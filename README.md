@@ -18,16 +18,20 @@ Install via the Omarchy plugin manager:
 omarchy plugin add https://github.com/Alih-b/omarchy-fox-pet --enable
 ```
 
-Or link directly for local development:
+For local development, run this from your checkout after making changes:
 
 ```bash
-mkdir -p ~/.config/omarchy/plugins
-ln -s "$(pwd)" ~/.config/omarchy/plugins/fox-pet
-omarchy plugin rescan
-omarchy plugin enable fox-pet
+./install.sh
 ```
 
-To update to the latest release:
+This installs your current working files, including uncommitted edits, reloads
+the plugin, enables it, and shows the fox. It verifies that the shell loaded
+the installed code and prints the location of the previous plugin backup.
+You do not need to remove the plugin or commit changes first.
+`omarchy plugin add "$PWD"` clones committed Git history and does not include
+uncommitted edits.
+
+To update a regular Git installation to the latest published release:
 
 ```bash
 omarchy plugin update fox-pet
@@ -39,7 +43,7 @@ You can summon or dismiss Folio using the **Fox Pet** status bar widget, or inte
 
 | Input | Folio's Response |
 |---|---|
-| **Left-click** | Pokes Folio — she greets with an ear wag, or wakes gently from sleep |
+| **Left-click** | Pokes Folio — she waves one paw, or wakes gently from sleep; further pokes during wake-up let the rise finish |
 | **Double-click** | Toggles sleep state — she curls into a loaf or stretches awake |
 | **Scroll down** | Puts her to sleep |
 | **Scroll up** | Prompts her to leap |

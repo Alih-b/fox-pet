@@ -20,7 +20,6 @@ Window {
     facing: fox.spriteFacing
     frameOffsetY: fox.spriteOffsetY
     walking: fox.spriteState === fox.stateWalk
-    isTurning: fox.turnStep >= 0
     tiltDeg: fox.tiltDeg
   }
   property int observations: 0
@@ -54,8 +53,8 @@ Window {
       seen[fox.spriteFrame] = true
       check(fox.spriteSpec.row === 1 && fox.spriteFrame >= 1 && fox.spriteFrame <= 6,
             "real timer walk selected unrelated art")
-      check(sprite.currentRow === 1 && sprite.currentFrame >= 1 && sprite.currentFrame <= 6
-            && sprite.poseMix === 1, "rendered walk contains a stale row, planted pose or dissolve")
+        check(sprite.currentRow === 1 && sprite.currentFrame >= 1 && sprite.currentFrame <= 6,
+              "rendered walk contains a stale row or planted pose")
       check(Math.abs(fox.positionX - previousX) < 5, "real timer movement jumped")
       previousX = fox.positionX
       if (observations >= 240) {

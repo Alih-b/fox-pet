@@ -272,17 +272,11 @@ Item {
           frameOffsetY: root.service ? root.service.spriteOffsetY : 0
           facing: root.service ? root.service.spriteFacing : 1
           walking: root.service && root.service.spriteState === root.service.stateWalk
-          isTurning: root.service ? root.service.turnStep >= 0 : false
-          tiltDeg: root.service ? root.service.tiltDeg : 0
-          emoteSway: root.service ? (root.service.spriteState === root.service.statePlay
-            || root.service.spriteState === root.service.stateGreet) : false
+          tiltDeg: root.service && root.service.spriteState !== root.service.stateGreet ? root.service.tiltDeg : 0
+          emoteSway: root.service && root.service.spriteState === root.service.statePlay
           squash: root.service ? root.service.landingSquash : 0
           suspended: root.service && (root.service.movementPhase === "falling" || root.service.movementPhase === "rising")
           sleeping: root.isSleeping
-          softenFrames: root.service && root.service.spriteState === root.service.stateYawn
-          spriteFast: root.service && (root.service.spriteState === root.service.stateWalk
-            || root.service.spriteState === root.service.statePlay
-            || root.service.spriteState === root.service.stateGreet)
           breathing: root.service && root.service.movementPhase === "grounded"
             && (root.service.spriteState === root.service.stateIdle || root.service.spriteState === root.service.stateSleep)
           active: panel.visible

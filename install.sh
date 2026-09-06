@@ -10,6 +10,9 @@ backup_root="$HOME/.local/state/omarchy/fox-pet/plugin-backups"
 
 command -v jq >/dev/null
 command -v omarchy-shell >/dev/null
+command -v omarchy >/dev/null
+# Fail before moving any files if the shell cannot reload the plugin.
+omarchy-shell shell ping >/dev/null
 jq -e '.id == "fox-pet"' "$repo_dir/manifest.json" >/dev/null
 for file in Service.qml Panel.qml SpriteView.qml BarWidget.qml assets/pet.json assets/spritesheet.webp; do
   [[ -f "$repo_dir/$file" ]] || { echo "Missing release file: $file" >&2; exit 1; }
@@ -61,11 +64,14 @@ published=true
 echo "Installed fox-pet $(jq -r .version "$target/manifest.json") at $target"
 echo "Previous copies preserved at $backup"
 omarchy-shell shell rescanPlugins
+omarchy plugin enable fox-pet
 for (( attempt = 0; attempt < 15; attempt++ )); do
   running_build=$(omarchy-shell fox-pet build 2>/dev/null || true)
   if jq -e --arg path "/fox-pet/$release/Service.qml" \
       '.source | endswith($path)' <<< "$running_build" >/dev/null 2>&1; then
     echo "Verified running release: $release"
+    omarchy-shell shell summon fox-pet
+    echo "Fox is ready. After editing, run ./install.sh again; no commit or reinstall needed."
     exit 0
   fi
   sleep 0.2

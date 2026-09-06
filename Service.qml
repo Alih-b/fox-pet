@@ -74,7 +74,7 @@ Item {
     "walk":       { row: 1, frames: 8, fps: 8, sequence: [1, 2, 3, 4, 5, 6] },
     "sitRight":   { row: 2, frames: 3, fps: 1000 / 240 },
     "sitLeft":    { row: 2, frames: 3, fps: 1000 / 240 },
-    "greet":      { row: 3, frames: 4, fps: 10, sequence: [0, 1, 2, 1, 3], durations: [80, 90, 260, 90, 140] },
+    "greet":      { row: 3, frames: 4, fps: 10, sequence: [0, 1, 2, 1, 3], durations: [120, 80, 190, 110, 160] },
     "yawn":       { row: 4, frames: 5, fps: 4, sequence: [0, 1, 2, 3, 4], durations: [200, 220, 520, 240, 280] },
     "sleep":      { row: 5, frames: 8, fps: 5, sequence: [3, 4, 6, 7, 3, 4, 6, 7, 5], durations: [900, 800, 1100, 1300, 900, 800, 1100, 1300, 220] },
     "play":       { row: 6, frames: 6, fps: 8, sequence: [0, 1, 2, 3, 4, 5], durations: [100, 120, 130, 250, 200, 150] },
@@ -314,11 +314,6 @@ Item {
   property bool previewMode: false
   property string previewAction: ""
 
-  // Greet-chaining guard. The previous version re-rolled greet with an
-  // 80% probability which produced back-to-back greets in a row; this
-  // counter caps it at one greet per cycle and falls back to idle.
-  property int greetChainLeft: 0
-
   // ---------------------------------------------------- AI behavior picker
   //
   // The fox has two home-base states (idle and walk) and a small set of
@@ -353,7 +348,7 @@ Item {
   // yawn) are short bursts — under three seconds — so they read as
   // reactions, not as the fox's primary activity.
   function durationFor(action) {
-    if (previewMode) {
+    if (previewMode || action === stateGreet) {
       var clip = rows[action]
       if (clip.durations) return clip.durations.reduce(function(a, b) { return a + b }, 0)
       return (clip.sequence ? clip.sequence.length : clip.frames) * 1000 / clip.fps
@@ -363,7 +358,6 @@ Item {
     if (action === stateSleep)    return 8000 + Math.floor(Math.random() * 8000)
     if (action === statePlay)     return 1800 + Math.floor(Math.random() * 1500)
     if (action === stateAlert)    return 1200 + Math.floor(Math.random() * 1500)
-    if (action === stateGreet)    return 1000 + Math.floor(Math.random() * 1200)
     if (action === stateYawn)     return 1400 + Math.floor(Math.random() * 1000)
     if (action === stateSitRight) return 4000 + Math.floor(Math.random() * 4000)
     if (action === stateSitLeft)  return 4000 + Math.floor(Math.random() * 4000)
@@ -552,6 +546,9 @@ Item {
 
   function startAction(action, ms) {
     setState(action)
+    // Finish the wave on its pose clock, after braking/sit transitions have
+    // actually let it appear. An independent timer can truncate or repeat it.
+    if (action === stateGreet) ms = 0
     if (previewMode && (action === stateIdle || action === stateWalk
         || action === stateSleep || isSitState(action))) ms = 0
     if (ms > 0) {
@@ -572,27 +569,14 @@ Item {
     // If manual sleep is active, stay asleep until user interacts.
     if (petState === stateSleep && manualSleep) return
 
-    // Greet chains used to re-roll themselves indefinitely; the counter
-    // caps each cycle at one greet, then the fox settles into idle until
-    // the next roll.
-    if (petState === stateGreet) {
-      if (greetChainLeft > 0) {
-        greetChainLeft--
-        startAction(stateGreet, durationFor(stateGreet))
-        return
-      }
-      startAction(stateIdle, durationFor(stateIdle))
-      saveDebounce.restart()
-      return
-    }
     if (petState === stateSleep) {
       // A sleeping fox stretches and yawns before standing into idle
       startAction(stateYawn, durationFor(stateYawn))
       saveDebounce.restart()
       return
     }
-    // After any other emote (sit, play, alert, yawn) or after a long
-    // greet chain, return to idle first. From idle we then roll the
+    // After an emote (sit, play, alert, yawn), return to idle first.
+    // From idle we then roll the
     // next action; this stops the fox from chaining emotes back to back.
     var isHome = petState === stateIdle || petState === stateWalk
     if (!isHome) {
@@ -624,9 +608,6 @@ Item {
       var rightMargin = g.width - cellWidth * scale - edgeMargin
       if (positionX <= leftMargin) direction = 1
       else if (positionX >= rightMargin) direction = -1
-      // Re-arm the greet chain so the next time the user clicks the fox
-      // gets a clean shot at two greets in a row.
-      greetChainLeft = 1
     }
     startAction(action, ms)
   }
@@ -811,10 +792,14 @@ Item {
     if (spec.durations && spec.sequence) {
       var total = 0
       for (var i = 0; i < spec.durations.length; i++) total += spec.durations[i]
-      var remaining = animationElapsed + elapsedMs % total
+      var remaining = animationElapsed + (spriteState === stateGreet ? elapsedMs : elapsedMs % total)
       var slot = frameIndex % spec.sequence.length
       while (remaining >= spec.durations[slot]) {
         remaining -= spec.durations[slot]
+        if (spriteState === stateGreet && slot === spec.sequence.length - 1) {
+          startAction(stateIdle, previewMode ? 0 : durationFor(stateIdle))
+          return
+        }
         slot = (slot + 1) % spec.sequence.length
       }
       animationElapsed = remaining
@@ -826,6 +811,10 @@ Item {
     var frames = Math.floor((elapsed + 0.000001) / frameMs)
     animationElapsed = elapsed - frames * frameMs
     var frameCount = spec.sequence ? spec.sequence.length : spec.frames
+    if (spriteState === stateGreet && frameIndex + frames >= frameCount) {
+      startAction(stateIdle, previewMode ? 0 : durationFor(stateIdle))
+      return
+    }
     if (frames) frameIndex = (frameIndex + frames) % frameCount
   }
 
@@ -1002,6 +991,9 @@ Item {
   }
 
   function poke() {
+    // Additional clicks acknowledge the ongoing wake without replacing its
+    // half-risen pose with a standing wave.
+    if (sleepTransition === "wake") return
     manualSleep = false
     // User clicked the fox. The fox acknowledges with a greet pose —
     // unless it's airborne (where a small extra hop is friendlier than
@@ -1021,9 +1013,7 @@ Item {
       actionTimer.restart()
       return
     }
-    greetChainLeft = 1
-    // Let the authored sequence finish exactly once. A fixed 1200 ms timer
-    // outlasted the 660 ms greet clip and replayed its tail before settling.
+    // The pose clock completes one authored wave before returning to idle.
     startAction(stateGreet, durationFor(stateGreet))
   }
 

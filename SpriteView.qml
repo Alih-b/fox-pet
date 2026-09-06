@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 
-// A shared atlas texture with two cell views only while a pose dissolves.
+// One full-opacity atlas cell: blending translucent poses causes ghosting.
 // All deformation pivots around the paws, leaving placement and input alone.
 //
 // Procedural in-betweens fill the gaps:
@@ -21,14 +21,11 @@ Item {
   property int frameCol: 0
   property real frameOffsetY: 0
   property real facing: 1
-  property bool isTurning: false
   property bool walking: false
   property real tiltDeg: 0
   property real squash: 0
   property bool suspended: false
   property bool sleeping: false
-  property bool softenFrames: false
-  property bool spriteFast: false
   property bool breathing: false
   property bool emoteSway: false
   property bool active: true
@@ -37,12 +34,6 @@ Item {
   property int currentRow: -1
   property int currentFrame: 0
   property real currentOffset: 0
-  property int previousRow: 0
-  property int previousFrame: 0
-  property real previousOffset: 0
-  property bool previousSleeping: false
-  property bool currentWalking: false
-  property real poseMix: 1
   property real breath: 0
   property real stretch: suspended && !sleeping ? 0.025 : 0
   property real sway: 0
@@ -50,45 +41,18 @@ Item {
 
   function updatePose() {
     if (!ready) return
-    // When turning, cut frames crisply without crossfading to preserve 2D perspective sharpness.
-    if (isTurning || walking || currentWalking) {
-      dissolve.stop()
-      poseMix = 1
-      currentRow = frameRow
-      currentFrame = frameCol
-      currentOffset = frameOffsetY
-      currentWalking = walking
-      return
-    }
-    if (currentRow >= 0 && (frameRow !== currentRow || (softenFrames && frameCol !== currentFrame))) {
-      dissolve.stop()
-      previousRow = currentRow
-      previousFrame = currentFrame
-      previousOffset = currentOffset
-      // Keep fast locomotion and emote dissolves under one frame cadence so
-      // micro movements never visibly lag the physics step.
-      dissolve.duration = softenFrames ? 150 : spriteFast ? 90 : sleeping || previousSleeping ? 420 : 130
-      poseMix = active && !dragging ? 0 : 1
-      if (poseMix === 0) dissolve.start()
-    }
     currentRow = frameRow
     currentFrame = frameCol
     currentOffset = frameOffsetY
-    previousSleeping = sleeping
-    currentWalking = walking
   }
 
   // Row, column and facing bindings settle together before taking a pose
-  // snapshot. Never retain a new-row/old-column intermediate as a dissolve.
+  // snapshot. Never display a new-row/old-column intermediate pose.
   onFrameRowChanged: Qt.callLater(updatePose)
   onFrameColChanged: Qt.callLater(updatePose)
   onFrameOffsetYChanged: Qt.callLater(updatePose)
-  onWalkingChanged: Qt.callLater(updatePose)
-  onIsTurningChanged: if (isTurning) { dissolve.stop(); poseMix = 1 }
-  onDraggingChanged: if (dragging) { dissolve.stop(); poseMix = 1 }
   Component.onCompleted: { ready = true; updatePose() }
 
-  NumberAnimation { id: dissolve; target: root; property: "poseMix"; to: 1; easing.type: Easing.InOutSine }
   Behavior on stretch { NumberAnimation { duration: 280; easing.type: Easing.InOutSine } }
   SequentialAnimation on breath {
     running: root.active && root.breathing && !root.dragging
@@ -140,19 +104,9 @@ Item {
     AtlasCell {
       width: root.width
       height: root.height
-      y: root.previousOffset * root.height / root.cellHeight
-      row: root.previousRow
-      frame: root.previousFrame
-      opacity: 1 - root.poseMix
-      visible: opacity > 0
-    }
-    AtlasCell {
-      width: root.width
-      height: root.height
       y: root.currentOffset * root.height / root.cellHeight
       row: Math.max(0, root.currentRow)
       frame: root.currentFrame
-      opacity: root.poseMix
     }
   }
 }

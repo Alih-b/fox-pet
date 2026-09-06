@@ -92,8 +92,9 @@ Item {
         check(fox.petState === fox.stateGreet && fox.frameIndex === 4,
               "greet holds its final authored frame before completion")
         fox.animationStep(1)
-        check(fox.petState === fox.stateGreet && fox.frameIndex === 0,
-              "greet wraps exactly at authored duration")
+        check(fox.petState === fox.stateIdle && fox.frameIndex === 0,
+              "greet completes exactly at authored duration")
+        fox.preview("greet", 1)
         stage = 1
         ticks = 0
       } else if (stage === 1 && ticks >= 9) {
@@ -126,7 +127,7 @@ Item {
         check(fox.rows === savedRows, "failed reload keeps working rows")
         metadataWriter.setText(JSON.stringify(original))
         stage = 5
-      } else if (stage === 5 && fox.rows.greet.durations[0] === 80) {
+      } else if (stage === 5 && fox.rows.greet.durations[0] === original.sprite.rows.greet.durations[0]) {
         check(fox.metadataStatus === "ok", "reload recovers after error")
         fox.enabled = true
         stage = 6

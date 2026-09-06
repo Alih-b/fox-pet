@@ -335,6 +335,9 @@ class TestQmlMovement(unittest.TestCase):
     def test_timer_driven_walk_renderer(self):
         self.run_harness(Path(__file__).with_name("WalkRuntime.qml").read_text())
 
+    def test_greeting_and_wake_interactions(self):
+        self.run_harness(Path(__file__).with_name("GreetingWakeRuntime.qml").read_text())
+
     def test_preview_and_metadata_reload(self):
         self.run_harness(Path(__file__).with_name("PreviewRuntime.qml").read_text(), private_assets=True)
 
