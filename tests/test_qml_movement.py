@@ -335,13 +335,19 @@ class TestQmlMovement(unittest.TestCase):
     def test_timer_driven_walk_renderer(self):
         self.run_harness(Path(__file__).with_name("WalkRuntime.qml").read_text())
 
-    def run_harness(self, harness):
+    def test_preview_and_metadata_reload(self):
+        self.run_harness(Path(__file__).with_name("PreviewRuntime.qml").read_text(), private_assets=True)
+
+    def run_harness(self, harness, private_assets=False):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="fox-pet-qml-test-") as temp:
             temp_root = Path(temp)
             shutil.copy2(repo_root / "Service.qml", temp_root / "Service.qml")
             shutil.copy2(repo_root / "SpriteView.qml", temp_root / "SpriteView.qml")
-            (temp_root / "assets").symlink_to(repo_root / "assets")
+            if private_assets:
+                shutil.copytree(repo_root / "assets", temp_root / "assets")
+            else:
+                (temp_root / "assets").symlink_to(repo_root / "assets")
 
             # Service.qml imports the host's qs.Commons module. The movement
             # service does not use a Commons symbol, so a minimal local module
@@ -393,6 +399,25 @@ class TestQmlMovement(unittest.TestCase):
                             break
                         continue
                     output.append(line)
+                    if "HARNESS_IPC_READY" in line:
+                        def ipc(*args):
+                            result = subprocess.run(
+                                ["quickshell", "ipc", "--pid", str(process.pid),
+                                 "call", "fox-pet", *args],
+                                env=env, capture_output=True, text=True, timeout=2,
+                            )
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                            return result.stdout.strip()
+
+                        self.assertEqual(ipc("preview", "walk", "-1"), "ok")
+                        state = json.loads(ipc("debugState"))
+                        self.assertTrue(state["previewMode"])
+                        self.assertEqual(state["requestedAction"], "walk")
+                        self.assertEqual(state["facing"], -1)
+                        self.assertIn("loading", ipc("reloadAnimationMeta"))
+                        self.assertEqual(ipc("resume"), "ok")
+                        self.assertFalse(json.loads(ipc("debugState"))["previewMode"])
+                        self.assertEqual(ipc("disable"), "off")
                     if "HARNESS_DONE" in line:
                         break
                 else:

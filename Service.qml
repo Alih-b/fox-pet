@@ -310,12 +310,9 @@ Item {
     direction = newDirection
   }
 
-  // The AI lives on a rolling timer that decides the fox's next mood a few
-  // seconds into the future. The chosen action then runs on its own timers
-  // (animation cadence, walking duration) until it finishes or the AI picks
-  // something else.
-  property string pendingAction: ""
-  property int pendingDurationMs: 0
+  // Preview mode only changes scheduling; playback uses the normal service.
+  property bool previewMode: false
+  property string previewAction: ""
 
   // Greet-chaining guard. The previous version re-rolled greet with an
   // 80% probability which produced back-to-back greets in a row; this
@@ -356,6 +353,11 @@ Item {
   // yawn) are short bursts — under three seconds — so they read as
   // reactions, not as the fox's primary activity.
   function durationFor(action) {
+    if (previewMode) {
+      var clip = rows[action]
+      if (clip.durations) return clip.durations.reduce(function(a, b) { return a + b }, 0)
+      return (clip.sequence ? clip.sequence.length : clip.frames) * 1000 / clip.fps
+    }
     if (action === stateIdle)     return 4000 + Math.floor(Math.random() * 4500)
     if (action === stateWalk)     return 3000 + Math.floor(Math.random() * 3) * 1000
     if (action === stateSleep)    return 8000 + Math.floor(Math.random() * 8000)
@@ -549,9 +551,9 @@ Item {
   }
 
   function startAction(action, ms) {
-    pendingAction = action
-    pendingDurationMs = ms
     setState(action)
+    if (previewMode && (action === stateIdle || action === stateWalk
+        || action === stateSleep || isSitState(action))) ms = 0
     if (ms > 0) {
       actionTimer.interval = ms
       actionTimer.restart()
@@ -563,6 +565,10 @@ Item {
 
   function pickNextAction() {
     if (isDragging || isJumping || movementPhase !== "grounded") return
+    if (previewMode) {
+      startAction(stateIdle, 0)
+      return
+    }
     // If manual sleep is active, stay asleep until user interacts.
     if (petState === stateSleep && manualSleep) return
 
@@ -650,7 +656,6 @@ Item {
     // Contact and settling complete the jump; an action timeout must not
     // switch poses halfway through flight.
     actionTimer.stop()
-    pendingAction = stateIdle
   }
 
   // Called by the panel when the user releases a drag. If dropped mid-air,
@@ -891,7 +896,7 @@ Item {
         movementPhase = "grounded"
         isJumping = false
         if (petState === statePlay) setState(stateIdle)
-        if (!manualSleep && !actionTimer.running) startAction(petState, durationFor(petState))
+        if (!manualSleep && !actionTimer.running) startAction(petState, previewMode ? 0 : durationFor(petState))
       } else if (contactAge >= contactDuration) movementPhase = "settling"
     } else if (positionY > ground) positionY = ground
 
@@ -973,6 +978,8 @@ Item {
 
   function disable() {
     enabled = false
+    previewMode = false
+    previewAction = ""
     animTimer.stop()
     actionTimer.stop()
     velocityX = 0
@@ -1015,7 +1022,9 @@ Item {
       return
     }
     greetChainLeft = 1
-    startAction(stateGreet, 1200)
+    // Let the authored sequence finish exactly once. A fixed 1200 ms timer
+    // outlasted the 660 ms greet clip and replayed its tail before settling.
+    startAction(stateGreet, durationFor(stateGreet))
   }
 
   // Called by the panel's MouseArea on press.
@@ -1061,6 +1070,77 @@ Item {
       showShadow: showShadow,
       followCursor: followCursor
     }
+  }
+
+  // Development controls reuse the production clips, transitions and physics.
+  // Start at the same spot on the current monitor without changing settings.
+  function resetPreviewPose(newDirection) {
+    actionTimer.stop()
+    turnTimer.stop()
+    saveDebounce.stop()
+    manualSleep = false
+    isJumping = false
+    movementPhase = "grounded"
+    contactAge = 0
+    velocityX = 0
+    velocityY = 0
+    tiltDeg = 0
+    pointerNear = false
+    turnStep = -1
+    sleepTransition = ""
+    sitTransition = ""
+    sitFrame = 2
+    sitElapsed = 0
+    petState = stateIdle
+    visualDirection = newDirection
+    direction = newDirection
+    frameIndex = 0
+    animationElapsed = 0
+    walkDistance = 0
+    recomputeGround()
+    var g = screenGeometry(currentScreen())
+    positionX = Math.max(edgeMargin, (g.width - cellWidth * scale) / 2)
+    positionY = groundY
+    animTimer.restart()
+  }
+
+  function preview(action, newDirection) {
+    if (newDirection !== 1 && newDirection !== -1) return "error: direction must be 1 or -1"
+    if (action !== "jump" && !Object.prototype.hasOwnProperty.call(defaultRows, action))
+      return "error: unknown action"
+    if (!enabled) return "error: summon the fox first"
+    if (isDragging) return "error: release the drag first"
+    if ((action === "jump" || action === stateWalk) && !physicsEnabled)
+      return "error: enable Wander around for movement previews"
+    previewMode = true
+    previewAction = action
+    resetPreviewPose(newDirection)
+    if (action === "jump") jump()
+    else if (action === stateSleep) sleepNow()
+    else if (action === stateSpin) spin()
+    else if (action === stateSomersault) somersault()
+    else startAction(action, durationFor(action))
+    return "ok"
+  }
+
+  function resume() {
+    if (isDragging) return "error: release the drag first"
+    if (!previewMode) return "ok"
+    resetPreviewPose(direction)
+    previewMode = false
+    previewAction = ""
+    startAction(stateIdle, durationFor(stateIdle))
+    return "ok"
+  }
+
+  function debugState() {
+    return JSON.stringify({
+      previewMode: previewMode, requestedAction: previewMode ? previewAction : petState,
+      petState: petState, spriteState: spriteState, row: spriteSpec.row,
+      column: spriteFrame, facing: spriteFacing, movementPhase: movementPhase,
+      positionX: positionX, positionY: positionY, velocityX: velocityX, velocityY: velocityY,
+      actionTimerRunning: actionTimer.running, metadataStatus: metadataStatus
+    })
   }
 
   function applySettings(values) {
@@ -1110,6 +1190,7 @@ Item {
   }
 
   function saveState() {
+    if (previewMode) return
     if (!stateDirCreated) return
     // Don't start a second write while one is in flight — Quickshell's
     // Process doesn't queue commands, so re-running it would orphan the
@@ -1159,6 +1240,7 @@ Item {
   // tries to write into it. Created once.
   property bool stateDirCreated: false
   property bool petMetaLoaded: false
+  property string metadataStatus: "loading"
   Process {
     id: mkdirProc
     command: ["bash", "-c", "mkdir -p \"$0\"", service.stateDir]
@@ -1170,7 +1252,7 @@ Item {
     }
   }
 
-  // pet.json carries sprite metadata + pet identity. Read once at startup;
+  // pet.json carries sprite metadata + pet identity. Read at startup or reload;
   // the panel binds to the parsed fields. A missing file leaves the stock
   // defaults in place — the plugin never fails on missing metadata.
   FileView {
@@ -1178,13 +1260,73 @@ Item {
     path: service.petMetaPath
     printErrors: false
     onLoaded: service.applyPetMeta(text())
-    onLoadFailed: { /* keep defaults */ }
+    onLoadFailed: service.metadataStatus = "error: could not read pet.json; previous metadata retained"
+  }
+
+  function reloadAnimationMeta() {
+    metadataStatus = "loading"
+    petMetaLoader.reload()
+    return "loading; check debugState metadataStatus"
+  }
+
+  function positiveInteger(value) {
+    return typeof value === "number" && isFinite(value) && value > 0 && Math.floor(value) === value
+  }
+
+  function validateSprite(sprite) {
+    if (!sprite || typeof sprite !== "object" || Array.isArray(sprite)) throw new Error("sprite must be an object")
+    for (var key of ["columns", "rowCount", "cellWidth", "cellHeight"])
+      if (!positiveInteger(sprite[key])) throw new Error(key + " must be a positive integer")
+    if (!sprite.rows || typeof sprite.rows !== "object" || Array.isArray(sprite.rows))
+      throw new Error("rows must be an object")
+    for (var name in sprite.rows) {
+      var clip = sprite.rows[name]
+      if (!clip || typeof clip !== "object" || !Number.isInteger(clip.row)
+          || clip.row < 0 || clip.row >= sprite.rowCount
+          || !positiveInteger(clip.frames) || clip.frames > sprite.columns)
+        throw new Error(name + ": invalid frame bounds")
+      if (typeof clip.fps !== "number" || !isFinite(clip.fps) || clip.fps <= 0)
+        throw new Error(name + ": fps must be positive")
+      if (clip.sequence !== undefined) {
+        if (!Array.isArray(clip.sequence) || !clip.sequence.length) throw new Error(name + ": empty sequence")
+        for (var frame of clip.sequence)
+          if (!Number.isInteger(frame) || frame < 0 || frame >= clip.frames)
+            throw new Error(name + ": sequence frame out of bounds")
+      }
+      if (clip.durations !== undefined) {
+        if (!Array.isArray(clip.durations) || !clip.sequence || clip.durations.length !== clip.sequence.length)
+          throw new Error(name + ": durations must match sequence")
+        var total = 0
+        for (var ms of clip.durations) {
+          if (typeof ms !== "number" || !isFinite(ms) || ms <= 0) throw new Error(name + ": duration must be positive")
+          total += ms
+        }
+        if (!isFinite(total)) throw new Error(name + ": duration sum is too large")
+      }
+    }
   }
 
   function applyPetMeta(raw) {
-    if (!raw) return
     try {
       var data = JSON.parse(raw)
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("metadata must be an object")
+      // Stage the complete candidate before committing any fields. Partial
+      // metadata still inherits the stock defaults, including missing rows.
+      var sprite = { columns: defaultColumns, rowCount: defaultRowCount,
+        cellWidth: defaultCellWidth, cellHeight: defaultCellHeight, rows: {} }
+      for (var k in defaultRows) sprite.rows[k] = defaultRows[k]
+      if (data.sprite !== undefined) {
+        if (!data.sprite || typeof data.sprite !== "object" || Array.isArray(data.sprite))
+          throw new Error("sprite must be an object")
+        for (var dimension of ["columns", "rowCount", "cellWidth", "cellHeight"])
+          if (data.sprite[dimension] !== undefined) sprite[dimension] = data.sprite[dimension]
+        if (data.sprite.rows !== undefined) {
+          if (!data.sprite.rows || typeof data.sprite.rows !== "object" || Array.isArray(data.sprite.rows))
+            throw new Error("rows must be an object")
+          for (var sk in data.sprite.rows) sprite.rows[sk] = data.sprite.rows[sk]
+        }
+      }
+      validateSprite(sprite)
       if (typeof data.displayName === "string" && data.displayName.length > 0)
         petDisplayName = data.displayName
       if (typeof data.description === "string")
@@ -1193,26 +1335,21 @@ Item {
         spriteVersionNumber = data.spriteVersionNumber
       if (typeof data.spritesheetPath === "string" && data.spritesheetPath.length > 0)
         spriteUrl = Qt.resolvedUrl("assets/" + data.spritesheetPath)
-      var sprite = data.sprite
-      if (sprite && typeof sprite === "object") {
-        if (typeof sprite.columns === "number" && sprite.columns > 0) columns = sprite.columns
-        if (typeof sprite.cellWidth === "number" && sprite.cellWidth > 0) cellWidth = sprite.cellWidth
-        if (typeof sprite.cellHeight === "number" && sprite.cellHeight > 0) cellHeight = sprite.cellHeight
-        if (typeof sprite.rowCount === "number" && sprite.rowCount > 0) rowCount = sprite.rowCount
-        if (sprite.rows && typeof sprite.rows === "object") {
-          // Merge: keep any state the json doesn't override so a partial
-          // pet.json (one new sprite row) doesn't drop the rest.
-          var merged = {}
-          for (var k in defaultRows) merged[k] = defaultRows[k]
-          for (var sk in sprite.rows) {
-            if (sprite.rows[sk] && typeof sprite.rows[sk] === "object") merged[sk] = sprite.rows[sk]
-          }
-          rows = merged
-        }
-      }
+      columns = sprite.columns
+      cellWidth = sprite.cellWidth
+      cellHeight = sprite.cellHeight
+      rowCount = sprite.rowCount
+      rows = sprite.rows
+      frameIndex = 0
+      animationElapsed = 0
+      animTimer.lastTick = Date.now()
       petMetaLoaded = true
+      metadataStatus = "ok"
+      return true
     } catch (e) {
-      console.warn("fox-pet: pet.json unreadable, using defaults:", e)
+      metadataStatus = "error: " + e + "; previous metadata retained"
+      console.warn("fox-pet:", metadataStatus)
+      return false
     }
   }
 
@@ -1262,6 +1399,10 @@ Item {
     function jump(): string { service.jump(); return "ok" }
     function somersault(): string { service.somersault(); return "ok" }
     function spin(): string { service.spin(); return "ok" }
+    function preview(action: string, direction: int): string { return service.preview(action, direction) }
+    function resume(): string { return service.resume() }
+    function debugState(): string { return service.debugState() }
+    function reloadAnimationMeta(): string { return service.reloadAnimationMeta() }
     function position(): string {
       return Math.round(service.positionX) + "," + Math.round(service.positionY)
     }

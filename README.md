@@ -85,3 +85,38 @@ QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= QT_QUICK_BACKEND=software /usr/l
 These check distance and stride continuity across refresh rates, starts and
 wall reversals, a real timer-driven walk, and rendered pixels against the
 six authored walking crops in both directions.
+
+## Animation tuning
+
+Summon Folio first, then use the development commands to repeat an action:
+
+```bash
+omarchy-shell fox-pet preview walk -1   # walk left from the center of the current screen
+omarchy-shell fox-pet preview greet 1   # play one greeting, then hold idle
+omarchy-shell fox-pet debugState       # requested action, actual pose, motion, reload status
+omarchy-shell fox-pet reloadAnimationMeta
+omarchy-shell fox-pet resume           # return to normal autonomous behavior
+```
+
+`preview` requires a direction of `1` or `-1` and accepts `idle`, `walk`,
+`sitRight`, `sitLeft`, `greet`, `sleep`, `play`, `alert`, `yawn`, `think`,
+`spin`, `somersault`, and `jump`. Each call clears temporary motion and starts
+grounded at the center of the current monitor. Authored facing restrictions
+still apply; for example, greeting faces forward regardless of direction.
+Idle, walk, sitting, and sleep hold until another command. Other clips play
+once and return to idle; jumping finishes after landing. Walk and jump require
+the **Wander around** setting. Release any drag before previewing or resuming.
+
+Use the frame atlas to choose poses, edit `sequence` and `durations` in
+`assets/pet.json`, run `reloadAnimationMeta`, and check `debugState` until
+`metadataStatus` is `ok`. Then repeat the preview command to review the change
+with the actual renderer and new clip duration. Reload is asynchronous; invalid
+or unreadable metadata leaves the working copy intact and reports an error in
+`metadataStatus`. No shell restart is needed for metadata changes.
+
+Preview mode pauses random behavior without changing settings. Mouse actions
+still work, so keep the pointer away when comparing repeated previews. Preview
+state is transient, position saves are suppressed while previewing, and hiding
+the fox clears preview mode. `resume` resets to grounded idle and restarts the
+normal action timer. The tests above also cover preview controls and metadata
+reload using a private copy of the assets.
