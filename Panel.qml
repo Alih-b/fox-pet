@@ -271,10 +271,9 @@ Item {
           frameCol: root.frameCol
           frameOffsetY: root.service ? root.service.spriteOffsetY : 0
           facing: root.service ? root.service.spriteFacing : 1
+          walking: root.service && root.service.spriteState === root.service.stateWalk
           isTurning: root.service ? root.service.turnStep >= 0 : false
           tiltDeg: root.service ? root.service.tiltDeg : 0
-          walkPhase: root.service ? root.service.walkPhase : 0
-          speedMix: root.service ? root.service.speedMix : 0
           emoteSway: root.service ? (root.service.spriteState === root.service.statePlay
             || root.service.spriteState === root.service.stateGreet) : false
           squash: root.service ? root.service.landingSquash : 0
@@ -381,10 +380,11 @@ Item {
               lastStrokeX = mouse.x
             }
 
-            // Precise cursor glance: eliminate redundant property assignments at high polling rates
+            // Use a generous center dead zone so tiny pointer movements do
+            // not choose an arbitrary facing as the hover begins.
             if (!root.service.followCursor || root.service.isJumping || walking) return
             var centerDist = mouse.x - width / 2
-            if (Math.abs(centerDist) > 8) {
+            if (Math.abs(centerDist) > Math.max(18, width * 0.12)) {
               var newDir = centerDist > 0 ? 1 : -1
               if (root.service.pointerGlanceDirection !== newDir) {
                 root.service.pointerGlanceDirection = newDir

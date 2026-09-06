@@ -7,8 +7,7 @@ import QtQuick
 // Procedural in-betweens fill the gaps:
 // - Turnaround is handled cleanly via Row 9 rotational frames in Service.qml.
 // - Facing is strictly discrete (+1 or -1), completely eliminating coin-flip distortions.
-// - Stride bob rides on render item only; dragProxy and hitbox remain unaffected.
-// - Subtle body tilt leans into movement.
+// - Walking uses the authored poses without extra deformation or dissolves.
 // - Subtle breathing cycles continuously while idle or sleeping.
 Item {
   id: root
@@ -23,9 +22,8 @@ Item {
   property real frameOffsetY: 0
   property real facing: 1
   property bool isTurning: false
+  property bool walking: false
   property real tiltDeg: 0
-  property real walkPhase: 0
-  property real speedMix: 0
   property real squash: 0
   property bool suspended: false
   property bool sleeping: false
@@ -43,26 +41,23 @@ Item {
   property int previousFrame: 0
   property real previousOffset: 0
   property bool previousSleeping: false
+  property bool currentWalking: false
   property real poseMix: 1
   property real breath: 0
   property real stretch: suspended && !sleeping ? 0.025 : 0
   property real sway: 0
   property bool ready: false
 
-  // Stride bob: two steps per phase cycle, amplitude scaled by speedMix so
-  // the body settles instead of snapping when locomotion eases out.
-  // Grounded only — suspension uses stretch, turning keeps feet planted.
-  readonly property real strideBob: (dragging || suspended || isTurning) ? 0 : Math.cos(walkPhase * 2) * 3.2 * speedMix
-
   function updatePose() {
     if (!ready) return
     // When turning, cut frames crisply without crossfading to preserve 2D perspective sharpness.
-    if (isTurning) {
+    if (isTurning || walking || currentWalking) {
       dissolve.stop()
       poseMix = 1
       currentRow = frameRow
       currentFrame = frameCol
       currentOffset = frameOffsetY
+      currentWalking = walking
       return
     }
     if (currentRow >= 0 && (frameRow !== currentRow || (softenFrames && frameCol !== currentFrame))) {
@@ -80,11 +75,15 @@ Item {
     currentFrame = frameCol
     currentOffset = frameOffsetY
     previousSleeping = sleeping
+    currentWalking = walking
   }
 
-  onFrameRowChanged: updatePose()
-  onFrameColChanged: updatePose()
-  onFrameOffsetYChanged: updatePose()
+  // Row, column and facing bindings settle together before taking a pose
+  // snapshot. Never retain a new-row/old-column intermediate as a dissolve.
+  onFrameRowChanged: Qt.callLater(updatePose)
+  onFrameColChanged: Qt.callLater(updatePose)
+  onFrameOffsetYChanged: Qt.callLater(updatePose)
+  onWalkingChanged: Qt.callLater(updatePose)
   onIsTurningChanged: if (isTurning) { dissolve.stop(); poseMix = 1 }
   onDraggingChanged: if (dragging) { dissolve.stop(); poseMix = 1 }
   Component.onCompleted: { ready = true; updatePose() }
@@ -126,14 +125,10 @@ Item {
   Item {
     anchors.fill: parent
     transform: [
-      Translate {
-        // Stride bob rides the render item only; dragProxy and hitbox stay put.
-        y: root.strideBob * root.height / root.cellHeight
-      },
       Rotation {
         origin.x: root.width / 2
         origin.y: root.height * (root.cellHeight - 5) / root.cellHeight
-        angle: root.tiltDeg + (root.emoteSway ? root.sway * 2.5 : 0)
+        angle: root.walking ? 0 : root.tiltDeg + (root.emoteSway ? root.sway * 2.5 : 0)
       },
       Scale {
         origin.x: root.width / 2

@@ -208,6 +208,9 @@ class TestFoxPetRegression(unittest.TestCase):
         # Invariant: walk must map to Row 1 (forward leap) rather than Row 9 (turntable spin)
         self.assertEqual(rows["walk"]["row"], 1)
         self.assertEqual(rows["walk"]["frames"], 8)
+        self.assertEqual(rows["walk"]["sequence"], [1, 2, 3, 4, 5, 6])
+        self.assertNotIn(0, rows["walk"]["sequence"])
+        self.assertNotIn(7, rows["walk"]["sequence"])
         self.assertEqual(rows["spin"]["row"], 9)
         self.assertEqual(rows["sleep"]["row"], 5)
 
@@ -472,12 +475,26 @@ class TestFoxPetRegression(unittest.TestCase):
         return int(raw.group(1)), src
 
     def test_turnaround_cadence_is_readable(self):
-        # 5 yaw poses at 36ms is a 180ms head whip. Match the spin row (~10fps)
-        # so a 180° turn reads as a turn, not a flicker.
+        # Five yaw poses need enough screen time to read as a turn, not a flicker.
         interval_ms, src = self._turn_timer_interval_ms()
         self.assertGreaterEqual(interval_ms, 90, "turn step is a head whip")
         self.assertGreaterEqual(interval_ms * 5, 450, "full yaw finishes before it can be read")
+        self.assertGreaterEqual(interval_ms, 150, "turnaround regressed to the old fast cadence")
         self.assertIn("sitTransition === \"\" && turnStep === -1 && movementPhase", src)
+
+    def test_turnaround_is_limited_to_idle(self):
+        _, src = self._turn_timer_interval_ms()
+        trigger = src[src.find("function triggerTurn()") : src.find("onDirectionChanged")]
+        self.assertIn("petState !== stateIdle", trigger)
+
+    def test_spin_is_slow_and_returns_to_its_starting_profile(self):
+        with open(self.pet_json_path, "r", encoding="utf-8") as f:
+            spin = json.load(f)["sprite"]["rows"]["spin"]
+
+        self.assertLessEqual(spin["fps"], 6)
+        self.assertEqual(spin["sequence"], [2, 3, 4, 5, 6, 7, 0, 1, 2])
+        self.assertEqual(spin["sequence"][0], spin["sequence"][-1])
+        self.assertGreaterEqual(sum(spin["durations"]), 1500)
 
     def test_mid_turn_reverse_does_not_restart(self):
         _, src = self._turn_timer_interval_ms()
@@ -498,7 +515,8 @@ class TestFoxPetRegression(unittest.TestCase):
 
     def test_walk_does_not_yaw_through_front(self):
         _, src = self._turn_timer_interval_ms()
-        self.assertIn("petState === stateWalk || Math.abs(velocityX) > 0.01", src)
+        trigger = src[src.find("function triggerTurn()") : src.find("onDirectionChanged")]
+        self.assertIn("petState !== stateIdle", trigger)
         self.assertNotIn(
             "else if (petState !== stateWalk) direction = Math.random() > 0.5 ? 1 : -1",
             src,
@@ -547,6 +565,19 @@ class TestFoxPetRegression(unittest.TestCase):
         glance = src[src.find("onPointerNearChanged"):]
         glance = glance[: glance.find("onScaleChanged")]
         self.assertIn("Math.abs(velocityX) > 0.01", glance)
+
+    def test_hover_latch_is_not_cleared_by_a_timer(self):
+        with open(os.path.join(self.repo_root, "Service.qml"), "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotIn("id: pointerGlanceTimer", src)
+        self.assertNotIn("pointerGlanceTimer.restart()", src)
+
+    def test_hover_glance_bypasses_full_body_turnaround(self):
+        with open(os.path.join(self.repo_root, "Service.qml"), "r", encoding="utf-8") as f:
+            src = f.read()
+        glance = src[src.find("function glanceToward") : src.find("function pickAction")]
+        self.assertIn("turnStep = -1", glance)
+        self.assertLess(glance.find("visualDirection = newDirection"), glance.find("direction = newDirection"))
 
 
 class _TurnMachine:

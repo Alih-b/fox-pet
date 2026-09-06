@@ -74,3 +74,14 @@ A private viewer with every named frame, row metadata, and live cadence previews
 python3 tools/build-frame-atlas.py
 xdg-open scratch/frame-atlas.html
 ```
+
+Walking verification (requires Quickshell and Qt Quick Test):
+
+```bash
+python3 -m unittest discover -s tests
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunner -input tests/tst_walk_render.qml
+```
+
+These check distance and stride continuity across refresh rates, starts and
+wall reversals, a real timer-driven walk, and rendered pixels against the
+six authored walking crops in both directions.

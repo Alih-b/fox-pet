@@ -69,7 +69,9 @@ Item {
   // cells; airborne and landing phases hold a pose instead of looping.
   readonly property var defaultRows: ({
     "idle":       { row: 0, frames: 7, fps: 5, sequence: [0, 1, 2, 1, 0, 1, 2, 1, 0, 4, 0, 5, 0, 6], durations: [3600, 90, 110, 90, 3600, 90, 110, 90, 4200, 140, 3800, 120, 4000, 160] },
-    "walk":       { row: 1, frames: 8, fps: 8 },
+    // Cells 0 and 7 are planted transition poses. Repeating either inside
+    // the stride makes the fox stand upright for a single, jarring beat.
+    "walk":       { row: 1, frames: 8, fps: 8, sequence: [1, 2, 3, 4, 5, 6] },
     "sitRight":   { row: 2, frames: 3, fps: 1000 / 240 },
     "sitLeft":    { row: 2, frames: 3, fps: 1000 / 240 },
     "greet":      { row: 3, frames: 4, fps: 10, sequence: [0, 1, 2, 1, 3], durations: [80, 90, 260, 90, 140] },
@@ -78,7 +80,9 @@ Item {
     "play":       { row: 6, frames: 6, fps: 8, sequence: [0, 1, 2, 3, 4, 5], durations: [100, 120, 130, 250, 200, 150] },
     "think":      { row: 7, frames: 6, fps: 5, sequence: [0, 1, 2, 3, 4, 5], durations: [180, 220, 250, 450, 280, 320] },
     "alert":      { row: 8, frames: 6, fps: 6, sequence: [0, 1, 2, 3, 4, 5], durations: [120, 140, 160, 70, 180, 380] },
-    "spin":       { row: 9, frames: 8, fps: 10 },
+    "spin":       { row: 9, frames: 8, fps: 1000 / 180,
+                    sequence: [2, 3, 4, 5, 6, 7, 0, 1, 2],
+                    durations: [180, 180, 180, 180, 180, 180, 180, 180, 180] },
     "somersault": { row: 10, frames: 8, fps: 8 }
   })
 
@@ -161,15 +165,20 @@ Item {
   // leap row is a poor falling pose and causes a silhouette pop on contact.
   readonly property string spriteState: isDragging ? (manualSleep ? stateSleep : stateIdle)
     : movementPhase !== "grounded" ? (manualSleep && sleepTransition !== "curl" ? stateSleep : stateIdle)
+    : Math.abs(velocityX) > 0.01 ? stateWalk
     : showingSit ? sitPoseState
     : sleepTransition !== "" ? stateYawn
     : turnStep >= 0 ? stateSpin
     : manualSleep ? stateSleep
-    : Math.abs(velocityX) > 0.01 ? stateWalk : petState
+    : petState
   readonly property var spriteSpec: rows[spriteState] || rows[stateIdle]
   readonly property int spriteFrame: {
     if (isDragging || movementPhase !== "grounded") return 0
     if (isSitState(spriteState)) return sitFrame
+    if (spriteState === stateWalk) {
+      var stride = spriteSpec.sequence || [1, 2, 3, 4, 5, 6]
+      return stride[Math.floor((walkDistance + 0.000001) / walkFrameDistance) % stride.length]
+    }
     if (sleepTransition !== "") {
       var curl = [2, 1, 0, 4]
       var wake = [4, 0, 1, 2]
@@ -179,7 +188,14 @@ Item {
       var turnFrames = [2, 1, 0, 1, 2]
       return turnFrames[Math.max(0, Math.min(4, turnStep))]
     }
-    if (spriteState === stateWalk && Math.abs(velocityX) < walkSpeed * 0.25) return 0
+    // A manual spin starts and finishes on the current profile. This avoids
+    // jumping to the frontal cell at the beginning or ending on a back pose.
+    if (spriteState === stateSpin) {
+      var spinRight = [2, 3, 4, 5, 6, 7, 0, 1, 2]
+      var spinLeft = [6, 7, 0, 1, 2, 3, 4, 5, 6]
+      var spinFrames = spinFromDir < 0 ? spinLeft : spinRight
+      return spinFrames[frameIndex % spinFrames.length]
+    }
     return spriteSpec.sequence ? spriteSpec.sequence[frameIndex % spriteSpec.sequence.length] : frameIndex % spriteSpec.frames
   }
   // The crouching and curled cells have extra bottom padding. Align paws,
@@ -187,13 +203,16 @@ Item {
   readonly property real spriteOffsetY: spriteState === stateSleep ? 9
     : spriteState === stateYawn ? [15, 0, 0, 0, 14][spriteFrame] || 0 : 0
   property real animationElapsed: 0
-  // Walk re-entry keeps its stride phase (no mid-stride pop); every other
-  // state change restarts locomotion blending from rest.
+  property real walkDistance: 0
+  // At cruising speed the authored stride plays at 8fps. Distance drives
+  // the pose on the same presentation tick as position, including braking.
+  readonly property real walkFrameDistance: walkSpeed * 1000 / 16 / 8
+  // A new rendered action starts a fresh clip; braking keeps the walk clip.
   onSpriteStateChanged: {
     frameIndex = 0
     animationElapsed = 0
     animTimer.lastTick = Date.now()
-    if (spriteState !== stateWalk) speedMix = 0
+    if (spriteState === stateWalk) walkDistance = 0
   }
 
   // ---------------------------------------------------------- visual motion
@@ -202,28 +221,28 @@ Item {
   // Instead of linearly scaling xScale through zero (which flips the 2D sprite
   // like a paper coin), turns cycle through Row 9 rotational frames:
   // side -> quarter -> front -> mirrored quarter -> mirrored side.
-  // Cadence matches the spin row (10fps). A direction change mid-yaw
-  // reverses the remaining arc instead of restarting from profile.
+  // A deliberate 150ms cadence keeps the change readable. A direction
+  // change mid-yaw reverses the remaining arc instead of restarting.
   property int visualDirection: 1
   property int turnStep: -1
   property int turnFromDir: 1
-  property real walkPhase: 0
-  property real speedMix: 0
+  property int spinFromDir: 1
   property real tiltDeg: 0
-  readonly property real strideLength: 24.0
-  readonly property int turnStepMs: 100
+  readonly property int turnStepMs: 150
 
   function triggerTurn() {
-    if (!enabled || isDragging || movementPhase !== "grounded" || petState === stateSleep) {
+    // Only the idle profile uses a perspective yaw. Emotes are drawn from a
+    // fixed viewpoint, while walk and spin already provide their own motion.
+    // Letting their direction normalization enter this state machine caused
+    // brief, unrelated row-9 flashes between actions.
+    if (!enabled || isDragging || movementPhase !== "grounded" || petState !== stateIdle) {
       visualDirection = direction
       turnStep = -1
       turnTimer.stop()
       return
     }
     if (direction === visualDirection && turnStep === -1) return
-    // Walk stays in profile. A yaw through the front cell reads as the
-    // head swinging at the camera, then snapping back to the leap row.
-    if (petState === stateWalk || Math.abs(velocityX) > 0.01) {
+    if (Math.abs(velocityX) > 0.01) {
       visualDirection = direction
       turnStep = -1
       turnTimer.stop()
@@ -277,9 +296,19 @@ Item {
   // The cursor is hovering the fox's hit area. With followCursor enabled
   // the fox glances toward the cursor briefly instead of freezing.
   property bool pointerNear: false
-  property int pointerGlanceAt: 0
   property int pointerGlanceDirection: 1
   property bool manualSleep: false
+
+  function glanceToward(newDirection) {
+    if (newDirection !== 1 && newDirection !== -1) return
+    // Idle artwork faces mostly forward, while the first turnaround cell is
+    // a hard side profile. Cursor glances therefore update facing directly;
+    // entering the row-9 yaw here is what made the head appear to jump.
+    turnStep = -1
+    turnTimer.stop()
+    visualDirection = newDirection
+    direction = newDirection
+  }
 
   // The AI lives on a rolling timer that decides the fox's next mood a few
   // seconds into the future. The chosen action then runs on its own timers
@@ -337,7 +366,15 @@ Item {
     if (action === stateSitRight) return 4000 + Math.floor(Math.random() * 4000)
     if (action === stateSitLeft)  return 4000 + Math.floor(Math.random() * 4000)
     if (action === stateSomersault) return 1600
-    if (action === stateSpin) return 1200
+    if (action === stateSpin) {
+      var spinSpec = rows[stateSpin]
+      if (spinSpec && spinSpec.durations) {
+        var spinDuration = 0
+        for (var i = 0; i < spinSpec.durations.length; i++) spinDuration += spinSpec.durations[i]
+        return spinDuration
+      }
+      return 1620
+    }
     if (action === stateThink) return 2200
     return 2000
   }
@@ -455,6 +492,11 @@ Item {
   // follow-up (set velocity for walking, clear velocity for sitting, etc)
   // in one place. The panel just reads `petState` and the velocity.
   function setState(next) {
+    if (next !== stateIdle && turnStep >= 0) {
+      turnStep = -1
+      turnTimer.stop()
+      visualDirection = direction
+    }
     // Always reset frameIndex — clicking the fox while it's already
     // greeting should restart the greet animation, not no-op. The
     // motion profile (velocity, direction) is only set when the state
@@ -472,6 +514,12 @@ Item {
     } else if (changed && (isSitState(petState) || sitTransition !== "")) {
       sitTransition = "up"
       sitElapsed = 0
+    }
+    if (next === stateSpin) {
+      spinFromDir = direction
+      turnStep = -1
+      turnTimer.stop()
+      visualDirection = direction
     }
     petState = next
     if (changed) sleepTransition = next === stateSleep ? "curl" : waking ? "wake" : ""
@@ -497,7 +545,7 @@ Item {
     // frames are drawn right-facing). For other poses, facing tracks
     // the last direction the fox was moving so it doesn't snap.
     if (Math.abs(velocityX) < 0.01 && (next === stateGreet || next === statePlay || next === stateSleep
-        || next === stateYawn || next === stateSomersault || next === stateSpin || next === stateThink)) direction = 1
+        || next === stateYawn || next === stateSomersault || next === stateThink)) direction = 1
   }
 
   function startAction(action, ms) {
@@ -648,12 +696,10 @@ Item {
     if (petState === stateSleep) manualSleep = true
     isDragging = true
     actionTimer.stop()
-    pointerGlanceTimer.stop()
     velocityX = 0
     velocityY = 0
     isJumping = false
     contactAge = 0
-    speedMix = 0
     tiltDeg = 0
     turnStep = -1
     visualDirection = direction
@@ -703,21 +749,6 @@ Item {
     onTriggered: service.pickNextAction()
   }
 
-  // Pointer-glance timer. When the user hovers the fox with followCursor
-  // enabled, the fox faces the cursor for a short moment then returns to
-  // whatever the AI is doing.
-  Timer {
-    id: pointerGlanceTimer
-    interval: 1200
-    repeat: false
-    onTriggered: {
-      service.pointerNear = false
-      if (service.petState === service.stateWalk) {
-        service.direction = service.velocityX >= 0 ? 1 : -1
-      }
-    }
-  }
-
   // Elapsed time advances frames independently of physics. Delayed timer
   // callbacks retain the remainder and catch up instead of slowing the pose.
   Timer {
@@ -742,6 +773,7 @@ Item {
   function animationStep(elapsedMs) {
     if (!(elapsedMs > 0) || !isFinite(elapsedMs)) return
     if (isDragging || movementPhase !== "grounded") return
+    if (spriteState === stateWalk) return
     var spec = spriteSpec
     if (isSitState(spriteState)) {
       if (sitTransition === "") return
@@ -784,18 +816,29 @@ Item {
       if (slot !== frameIndex) frameIndex = slot
       return
     }
-    if (spriteState === stateWalk) elapsedMs *= Math.min(1, Math.abs(velocityX) / walkSpeed)
     var frameMs = 1000 / spec.fps
     var elapsed = animationElapsed + elapsedMs
     var frames = Math.floor((elapsed + 0.000001) / frameMs)
     animationElapsed = elapsed - frames * frameMs
-    if (frames) frameIndex = (frameIndex + frames) % spec.frames
+    var frameCount = spec.sequence ? spec.sequence.length : spec.frames
+    if (frames) frameIndex = (frameIndex + frames) % frameCount
   }
 
   // Velocities retain their public px/16ms units. Integrate against the
   // display's frame time so high-refresh screens don't show repeated steps.
   function physicsStep(elapsedMs) {
-    var dt = Math.min(32, Math.max(1, elapsedMs === undefined ? 16 : elapsedMs)) / 16
+    var remaining = elapsedMs === undefined ? 16 : elapsedMs
+    if (!(remaining > 0) || !isFinite(remaining)) return
+    // Subdivide delayed presentation frames without dropping elapsed time.
+    // The same elapsed second must travel the same distance at 30 or 144Hz.
+    while (remaining > 0.000001) {
+      var stepMs = Math.min(16, remaining)
+      integratePhysicsStep(stepMs / 16)
+      remaining -= stepMs
+    }
+  }
+
+  function integratePhysicsStep(dt) {
     var g = service.screenGeometry(service.currentScreen())
     var scaledHeight = service.cellHeight * service.scale
     var ground = Math.round(g.height - scaledHeight - service.groundMargin)
@@ -817,16 +860,11 @@ Item {
       direction = -direction
       vx = 0
     }
+    var travelled = Math.abs(x - positionX)
     if (velocityX !== vx) velocityX = vx
     if (positionX !== x) positionX = x
-    // Render-only in-betweens: stride keyed to distance (no foot-slide),
-    // locomotion weight eased toward speed, facing turned through zero,
-    // body leaned into acceleration and flight.
-    var travelled = Math.abs(vx * dt)
-    if (travelled > 0) walkPhase += travelled / strideLength * Math.PI
-    var speedTarget = Math.max(0, Math.min(1, Math.abs(vx) / walkSpeed))
-    speedMix += Math.max(-0.12 * dt, Math.min(0.12 * dt, speedTarget - speedMix))
-    if (speedMix < 0.001 && speedTarget === 0) speedMix = 0
+    if (spriteState === stateWalk) walkDistance += travelled
+    // Lean applies to airborne motion and other poses, never the walk art.
     var leanTarget = Math.max(-9, Math.min(9, (target - vx) * 6
       + (movementPhase === "rising" ? -4 : movementPhase === "falling" ? 4 : 0)))
     tiltDeg += Math.max(-1.2 * dt, Math.min(1.2 * dt, leanTarget - tiltDeg))
@@ -878,11 +916,7 @@ Item {
     if (Math.abs(velocityX) > 0.01) return
     // Only glance in stationary poses so the fox never turns opposite its walk velocity
     if (petState === stateIdle || petState === stateSitRight || petState === stateSitLeft) {
-      if (pointerGlanceDirection === 1 || pointerGlanceDirection === -1) {
-        direction = pointerGlanceDirection
-      }
-      pointerGlanceAt = Date.now()
-      pointerGlanceTimer.restart()
+      glanceToward(pointerGlanceDirection)
     }
   }
 
@@ -941,7 +975,6 @@ Item {
     enabled = false
     animTimer.stop()
     actionTimer.stop()
-    pointerGlanceTimer.stop()
     velocityX = 0
     velocityY = 0
     isJumping = false
@@ -1246,7 +1279,6 @@ Item {
     physicsTimer.stop()
     actionTimer.stop()
     turnTimer.stop()
-    pointerGlanceTimer.stop()
     saveDebounce.stop()
     if (saveStateProc.running) saveStateProc.running = false
     if (mkdirProc.running) mkdirProc.running = false

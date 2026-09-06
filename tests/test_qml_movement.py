@@ -177,6 +177,74 @@ HARNESS = textwrap.dedent(
         }
         check(turned && fox.velocityX < 0, "wall turn resumes inward walk")
 
+        fox.positionX = 200
+        fox.direction = 1
+        fox.velocityX = fox.walkSpeed
+        fox.setState(fox.stateWalk)
+        fox.walkDistance = 0
+        fox.animationElapsed = 0
+        var strideFrames = []
+        for (var stride = 0; stride < 6; stride++) {
+          strideFrames.push(fox.spriteFrame)
+          fox.physicsStep(25)
+          fox.physicsStep(25)
+          fox.physicsStep(25)
+          fox.physicsStep(25)
+          fox.physicsStep(25)
+        }
+        check(JSON.stringify(strideFrames) === JSON.stringify([1, 2, 3, 4, 5, 6]),
+              "running loops only through active stride poses")
+        check(fox.spriteFrame === 1, "running loops directly into the next stride")
+
+        for (var cadence of [1000 / 30, 1000 / 60, 1000 / 144, 75]) {
+          fox.positionX = 200
+          fox.velocityX = fox.walkSpeed
+          fox.walkDistance = 0
+          var remainingTime = 1000
+          while (remainingTime > 0.000001) {
+            var elapsed = Math.min(cadence, remainingTime)
+            fox.physicsStep(elapsed)
+            remainingTime -= elapsed
+          }
+          check(closeEnough(fox.positionX - 200, fox.walkSpeed * 1000 / 16),
+                "cruise distance is independent of presentation cadence " + cadence)
+          check(closeEnough(fox.walkDistance, fox.positionX - 200),
+                "stride clock matches actual displacement")
+        }
+
+        // Observe every presentation step, including slow starts, braking,
+        // a reversal and a pending sleep transition. No planted/turn cells
+        // may leak into a moving stride at any display refresh rate.
+        for (var hz of [30, 60, 144]) {
+          fox.velocityX = 0
+          fox.setState(fox.stateIdle)
+          fox.positionX = rightEdge - 40
+          fox.positionY = fox.groundY
+          fox.direction = 1
+          fox.setState(fox.stateWalk)
+          var reversed = false
+          for (var step = 0; step < hz * 3; step++) {
+            var beforeX = fox.positionX
+            fox.physicsStep(1000 / hz)
+            fox.animationStep(1000 / hz)
+            reversed = reversed || fox.direction === -1
+            check(fox.spriteSpec.row === 1 && fox.spriteFrame >= 1 && fox.spriteFrame <= 6,
+                  "walk contains only stride artwork at " + hz + "Hz")
+            check(Math.abs(fox.positionX - beforeX) <= fox.walkSpeed * 1000 / hz / 16 + 0.001,
+                  "walk position is continuous at " + hz + "Hz")
+          }
+          check(reversed, "wall reversal completes at " + hz + "Hz")
+          fox.setState(fox.stateSleep)
+          while (Math.abs(fox.velocityX) > 0.01) {
+            fox.physicsStep(1000 / hz)
+            if (Math.abs(fox.velocityX) > 0.01)
+              check(fox.spriteSpec.row === 1 && fox.spriteFrame >= 1 && fox.spriteFrame <= 6,
+                    "pending sleep never replaces a moving stride")
+          }
+          fox.setState(fox.stateIdle)
+          fox.animationStep(960) // finish the wake transition before next case
+        }
+
         fox.velocityX = 0
         fox.setState(fox.stateIdle)
         fox.animationStep(450)
@@ -197,6 +265,31 @@ HARNESS = textwrap.dedent(
         check(fox.spriteFrame === 0, "blink cycle returns to standing pose")
 
         fox.enabled = true
+        fox.direction = -1
+        fox.visualDirection = -1
+        fox.spin()
+        check(fox.turnStep === -1 && fox.spinFromDir === -1 && fox.spriteFrame === 6,
+              "spin starts from the current left profile without a stray yaw")
+        fox.animationStep(1440)
+        check(fox.frameIndex === 8 && fox.spriteFrame === 6,
+              "spin completes one revolution at the same profile")
+        fox.startAction(fox.stateIdle, 0)
+
+        fox.direction = -1
+        fox.visualDirection = -1
+        fox.setState(fox.stateGreet)
+        check(fox.direction === 1 && fox.turnStep === -1,
+              "front-facing emote normalization does not flash turnaround frames")
+
+        fox.setState(fox.stateIdle)
+        fox.direction = 1
+        fox.visualDirection = 1
+        fox.pointerGlanceDirection = -1
+        fox.pointerNear = false
+        fox.pointerNear = true
+        check(fox.direction === -1 && fox.visualDirection === -1 && fox.turnStep === -1,
+              "hover glance changes facing without a side-profile head jump")
+
         fox.petState = fox.stateWalk
         fox.manualSleep = false
         fox.isDragging = true
@@ -237,10 +330,18 @@ HARNESS = textwrap.dedent(
 
 class TestQmlMovement(unittest.TestCase):
     def test_real_service_movement(self):
+        self.run_harness(HARNESS)
+
+    def test_timer_driven_walk_renderer(self):
+        self.run_harness(Path(__file__).with_name("WalkRuntime.qml").read_text())
+
+    def run_harness(self, harness):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="fox-pet-qml-test-") as temp:
             temp_root = Path(temp)
             shutil.copy2(repo_root / "Service.qml", temp_root / "Service.qml")
+            shutil.copy2(repo_root / "SpriteView.qml", temp_root / "SpriteView.qml")
+            (temp_root / "assets").symlink_to(repo_root / "assets")
 
             # Service.qml imports the host's qs.Commons module. The movement
             # service does not use a Commons symbol, so a minimal local module
@@ -255,7 +356,7 @@ class TestQmlMovement(unittest.TestCase):
             )
             harness_path = temp_root / "MovementHarness.qml"
             harness_path.write_text(
-                HARNESS.replace("__PET_META__", json.dumps(
+                harness.replace("__PET_META__", json.dumps(
                     (repo_root / "assets/pet.json").read_text(encoding="utf-8")
                 )), encoding="utf-8"
             )
@@ -265,6 +366,7 @@ class TestQmlMovement(unittest.TestCase):
             env.pop("WAYLAND_DISPLAY", None)
             env["QT_QPA_PLATFORM"] = "offscreen"
             env["QT_QPA_PLATFORMTHEME"] = ""
+            env["QT_QUICK_BACKEND"] = "software"
             env["XDG_RUNTIME_DIR"] = str(temp_root)
 
             process = subprocess.Popen(
