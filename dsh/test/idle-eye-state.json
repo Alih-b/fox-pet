@@ -1,0 +1,30 @@
+{
+    "0": {
+        "iris": 128,
+        "eyes": "open"
+    },
+    "1": {
+        "iris": 1,
+        "eyes": "closed"
+    },
+    "2": {
+        "iris": 0,
+        "eyes": "closed"
+    },
+    "3": {
+        "iris": 117,
+        "eyes": "open"
+    },
+    "4": {
+        "iris": 86,
+        "eyes": "open"
+    },
+    "5": {
+        "iris": 124,
+        "eyes": "open"
+    },
+    "6": {
+        "iris": 128,
+        "eyes": "open"
+    }
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Regression test suite for omarchy-fox-pet.
+Regression test suite for fox-pet.
 Validates state machine invariants, sprite math, multi-monitor mapping,
 drop physics, and persistence schema.
 """
