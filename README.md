@@ -1,21 +1,37 @@
 <div align="center">
-  <img width="800" height="604" alt="folio" src="https://github.com/user-attachments/assets/ca0bd050-72f6-4384-b217-44354abc265c" />
+  <img width="800" height="604" alt="Folio the fox" src="https://github.com/user-attachments/assets/ca0bd050-72f6-4384-b217-44354abc265c" />
 
   # Fox Pet
 
-  A desktop companion plugin for **Omarchy** featuring **Folio** the fox.
+  **Fox Pet** (`fox-pet`) adds Folio, a desktop companion fox, to your Omarchy
+  workspace. She wanders along the bottom of your screens, rests when you are
+  inactive, wakes with smooth stretch transitions, and responds to mouse
+  interactions and physics.
+
+  [![MIT](https://img.shields.io/badge/licence-MIT-blue?style=flat-square)](LICENSE)
+  ![Omarchy](https://img.shields.io/badge/Omarchy-Quickshell-1f6feb?style=flat-square)
+  ![DSH](https://img.shields.io/badge/DSH-Cordis%20plugin-111?style=flat-square)
 </div>
 
 ---
 
-**Fox Pet** (`fox-pet`) adds Folio, a desktop companion fox, to your Omarchy workspace. She wanders along the bottom of your screens, rests when you are inactive, wakes with smooth stretch transitions, and responds to mouse interactions and physics.
+The plugin runs in two shells from one set of assets.
+
+| | Omarchy | DeepSeek Harness |
+|---|---|---|
+| Runtime | Quickshell | Dynamic Cordis plugin |
+| Source | `Service.qml`, `Panel.qml`, `BarWidget.qml` | [`dsh/`](dsh/) |
+| Install | see below | [dsh/README.md](dsh/README.md) |
+
+Both read `assets/spritesheet.webp` and `assets/pet.json`. The DSH port ships no
+copy of the artwork.
 
 ## Installation
 
 Install via the Omarchy plugin manager:
 
 ```bash
-omarchy plugin add https://github.com/Alih-b/omarchy-fox-pet --enable
+omarchy plugin add https://github.com/Alih-b/fox-pet --enable
 ```
 
 For local development, run this from your checkout after making changes:
@@ -97,9 +113,9 @@ Summon Folio first, then use the development commands to repeat an action:
 ```bash
 omarchy-shell fox-pet preview walk -1   # walk left from the center of the current screen
 omarchy-shell fox-pet preview greet 1   # play one greeting, then hold idle
-omarchy-shell fox-pet debugState       # requested action, actual pose, motion, reload status
+omarchy-shell fox-pet debugState        # requested action, actual pose, motion, reload status
 omarchy-shell fox-pet reloadAnimationMeta
-omarchy-shell fox-pet resume           # return to normal autonomous behavior
+omarchy-shell fox-pet resume            # return to normal autonomous behavior
 ```
 
 `preview` requires a direction of `1` or `-1` and accepts `idle`, `walk`,
@@ -124,3 +140,46 @@ state is transient, position saves are suppressed while previewing, and hiding
 the fox clears preview mode. `resume` resets to grounded idle and restarts the
 normal action timer. The tests above also cover preview controls and metadata
 reload using a private copy of the assets.
+
+## DeepSeek Harness
+
+DSH cannot load QML, so the same behaviour is reimplemented as a Dynamic Cordis
+plugin. It has two halves: a host half that serves `assets/spritesheet.webp` over
+a local route, and a client half that runs the animation, physics and input
+handling in the web UI. It uses the same `pet.json` timings, except for idle and
+sitting, which are re-choreographed — see [`dsh/README.md`](dsh/README.md).
+
+The gestures differ from the desktop build:
+
+| Input | Response |
+|---|---|
+| **Left-click** | Poke — she waves, or wakes with a stretch |
+| **Left-click mid-fall** | Catches her; that height becomes the surface she stands on |
+| **Double-click** or **middle-click** | Toggle the sleep state |
+| **Scroll down** / **scroll up** | Sleep / leap |
+| **Click & drag** | Move her; releasing drops her and she falls at a capped speed |
+| **Fling** | A fast release slides her to a stop; a fast enough one spins her |
+| **Hit a wall hard** | She somersaults in place; the wall does not bounce her |
+| **Stroking the cursor across her** | Playful jump |
+| **Right-click** | Recentres her on the floor |
+
+The port is verified by five suites that need only Node:
+
+```bash
+cd dsh
+npm test
+```
+
+They cover the plugin's shape, engine invariants over 225000 ticks, the idle and
+sitting choreography, the CSS the component emits, and 60 interaction,
+physics and layout assertions.
+
+## Assets
+
+`assets/` is the only copy of the artwork: the 1536×2288 atlas, the frame-name
+map, and `pet.json`, the animation spec. Both shells read from it, so a new frame
+is added once.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
