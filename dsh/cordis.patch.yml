@@ -1,0 +1,8 @@
+# The dsh-fox-pet bundle patch.
+#
+# Applied after the profile's other bundles. `insert` adds a new entry to the
+# root of the composed tree; a bare row would instead patch an existing entry by
+# id, which is why this is wrapped.
+- insert:
+    - id: fox-pet
+      name: 'dsh-fox-pet'

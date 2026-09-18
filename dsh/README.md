@@ -46,6 +46,57 @@ function bodies, not modules: the host one is the body of `code.host` and the
 client one is the body of `code.client`. That is why `simulate-source-shape.mjs`
 stands in for the parse and lint checks a module would normally get.
 
+## Installing into DSH
+
+The port ships as a DSH plugin bundle. Install the package into a profile, list
+it in that profile's bundles, and restart the profile once:
+
+```bash
+dsh plugin --profile web add dsh-fox-pet@link:/path/to/this/checkout
+```
+
+Then add the package to `$DSH_HOME/profiles/web/package.json`:
+
+```json
+"dsh": {
+  "profile": {
+    "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-fox-pet"]
+  }
+}
+```
+
+Restart `dsh web`. The host half registers `/fox-pet/spritesheet.webp`; the
+browser half registers the fox in the `shell.overlay` slot.
+
+Two declarations make this work, and both are required:
+
+- **`dsh.bundle.patch`** — DSH activates a third-party plugin as a *bundle*. The
+  package ships `cordis.patch.yml`, and the profile names the package in
+  `dsh.profile.bundles`. A row written by hand into the profile's own patch is
+  not enough: it composes without error but the plugin never loads.
+- **`dsh.client.platform`, plus `exports["./client"]`** — the browser half is
+  discovered by the host's client module system from the Loader's entries and
+  served under `/plugins`. Without them the host half works and the fox never
+  appears.
+
+`link:` installs a symlink rather than a copy, so the host half keeps reading the
+repository's canonical `assets/` — there is no second copy of the atlas.
+
+Check the install without restarting your own server by booting a throwaway
+instance on another port:
+
+```bash
+dsh --profile web --port 3099 --no-open
+curl -sI http://127.0.0.1:3099/fox-pet/spritesheet.webp          # 200, the atlas
+curl -s  http://127.0.0.1:3099/plugins/??dsh-fox-pet/client.js   # the browser bundle
+```
+
+Both are served without the session cookie: plugin routes are matched before the
+shipped static fallback, which is where browser authentication lives.
+
+`lib/client.js` is generated. Edit `fox-pet.client.js` and run
+`npm run build:client`; `npm test` fails if the two disagree.
+
 ## Checks
 
 ```bash
