@@ -356,7 +356,27 @@ check('she reaches the floor', framesToLand >= 0, `landed after ${framesToLand} 
 // makes it a drift. Anything under 100 frames means the slow fall regressed.
 check('the descent is a slow fall, not a drop', framesToLand > 100, `${framesToLand} frames (~${(framesToLand * 16 / 1000).toFixed(2)}s)`)
 check('she lands exactly on the floor', state().bottom === 6, `bottom=${state().bottom}`)
-check('the landing is acknowledged with a settle hop', state().hopV > 0 || state().action === 'alert', `hopV=${state().hopV} action=${state().action}`)
+check('landing from leaf fall lands softly without a bounce', state().hopV === 0 && state().hop === 0, `hopV=${state().hopV} hop=${state().hop}`)
+check('landing is acknowledged with alert pose', state().action === 'alert', `action=${state().action}`)
+
+// The impact must not rebound her off the floor. Measured on the drawn offset
+// (hop) and on the spring: a damped spring released from rest at its compressed
+// extreme is the smallest excursion a linear spring can make, so any velocity
+// added at touchdown only deepens the stretch that follows. The bound sits just
+// above the measured 1.7% so re-adding a kick fails here.
+let landedRise = 0
+let landedMaxOvershoot = 0
+let prevBottom = state().bottom
+for (let i = 0; i < 120; i += 1) {
+  tick(1)
+  el = render()
+  const s = state()
+  if (s.bottom > prevBottom + 0.01) landedRise = Math.max(landedRise, s.bottom - 6)
+  if (s.squash < 0) landedMaxOvershoot = Math.min(landedMaxOvershoot, s.squash)
+  prevBottom = s.bottom
+}
+check('the landing never lifts her off the floor', landedRise < 0.01, `rise=${landedRise.toFixed(4)} px`)
+check('the landing does not rebound into a stretch', landedMaxOvershoot > -0.025, `overshoot=${landedMaxOvershoot.toFixed(3)}`)
 
 // --- hard fling tumbles, hard wall hit somersaults --------------------------
 tick(60)
@@ -446,6 +466,34 @@ pointerUp(1040, 300, { pointerId: 73 })
 el = render()
 check('dropping her again restores the default floor', state().ground === 6, `ground=${state().ground}`)
 check('a purely vertical drag counts as a drag, not a click', state().ground === 6 && state().bottom > 6, `ground=${state().ground} bottom=${state().bottom}`)
+
+// --- catching a sleeping fox mid-fall does not wake her ----------------------
+tick(200)
+el = render()
+fox().props.onDoubleClick({ preventDefault() {} })
+el = render()
+check('sleeping before the lift', state().mode === 'sleep', `mode=${state().mode}`)
+pointerDown(800, 700, { pointerId: 74 })
+clock += 16
+pointerMove(800, 300, { pointerId: 74 })
+pointerUp(800, 300, { pointerId: 74 })
+el = render()
+// Run until she is genuinely airborne rather than guessing a tick count: the
+// fall is a drift, so a fixed number of frames is not a fixed height.
+let midFallTicks = -1
+for (let i = 0; i < 600; i += 1) {
+  tick(1)
+  el = render()
+  if (state().bottom < 400 && state().bottom > 40) { midFallTicks = i; break }
+}
+check('sleeping fox is caught genuinely mid-fall', midFallTicks >= 0, `after ${midFallTicks} ticks, bottom=${state().bottom.toFixed(1)}`)
+pointerDown(800, 300, { pointerId: 75 })
+el = render()
+pointerUp(800, 300, { pointerId: 75 })
+el = render()
+check('clicking sleeping fox mid-fall perches her', state().ground > 6, `ground=${state().ground}`)
+check('clicking sleeping fox mid-fall does not wake her', state().mode === 'sleep', `mode=${state().mode}`)
+check('sleeping perched fox settles into the sleep loop', state().anim === 'sleep' && state().action === null, `anim=${state().anim} action=${state().action}`)
 
 // --- pose: squash on landing, scaled about her feet -------------------------
 ensureAwake()
@@ -580,6 +628,35 @@ pointerUp(800, 300, { pointerId: 94 })
 el = render()
 tick(30)
 el = render()
+
+// --- a click stops her, it does not just wave -------------------------------
+// A click used to play the greeting and then let the mode machine carry on with
+// whatever it had already chosen, so she would walk off mid-acknowledgement.
+ensureAwake()
+el = render()
+// Wait for her to be doing something other than resting, so the click has
+// something to interrupt. Which of walk/sit it is does not matter here.
+let busyMode = ''
+for (let i = 0; i < 20000; i += 1) {
+  tick(1)
+  if (state().mode !== 'idle' && state().mode !== 'sleep') { busyMode = state().mode; break }
+  if (i % 600 === 599) { fox().props.onContextMenu({ preventDefault() {} }); el = render() }
+}
+el = render()
+check('she is busy before the click', busyMode !== '', `mode=${state().mode}`)
+const xBeforeClick = state().x
+pointerDown(800, 300, { pointerId: 95 })
+pointerUp(800, 300, { pointerId: 95 })
+el = render()
+check('a click settles her into idle', state().mode === 'idle', `was ${busyMode}, now ${state().mode}`)
+check('a click stops her moving', state().vx === 0, `vx=${state().vx}`)
+const pausedFor = state().modeDur
+check('the pause is a long one', pausedFor >= 6000, `modeDur=${Math.round(pausedFor)}ms`)
+// She must still be idle when the greeting has finished, not just during it.
+for (let i = 0; i < 400; i += 1) tick(1)
+el = render()
+check('she is still idle after the greeting finishes', state().mode === 'idle', `mode=${state().mode} after ~6.4s`)
+check('she has not wandered during the pause', Math.abs(state().x - xBeforeClick) < 0.02, `moved ${Math.abs(state().x - xBeforeClick).toFixed(3)} of the frame`)
 
 let failed = 0
 for (const r of results) {
