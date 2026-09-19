@@ -47,7 +47,6 @@ const FALL_TERMINAL = 120
 const FALL_SWAY_PX = 16
 const FALL_SWAY_PERIOD = 900 // ms for one full left-right-left swing
 const LAND_IMPACT = 45
-const LAND_BOUNCE = 240
 
 // Pose. An impulse from a landing or a take-off is absorbed by a damped spring,
 // so she compresses on impact and overshoots gently back to neutral.
@@ -56,6 +55,10 @@ const SQUASH_DAMP = 17
 const SQUASH_LAND_MIN = 0.08
 const SQUASH_LAND_MAX = 0.26
 const SQUASH_JUMP = 0.14
+// Landing compression, capped below the take-off stretch. Measured worst stretch
+// after a fall to the floor: 1.7%, against 2.7% with a +30 release velocity and
+// 7.5% with a -32 one, so the spring is released from rest.
+const SQUASH_LAND_SCALE = 0.6
 
 // Momentum. Exponential decay and walls that absorb, instead of the old model
 // that bled 7% of speed per 50 ms tick and reflected at 45%.
@@ -258,11 +261,10 @@ return {
       settle(n)
     }
 
-    // Land with an impact: compress, and let the spring bring her back.
+    // Land with an impact: absorb it, never return it.
     function touchdown(n, impact) {
-      n.squash = clamp(SQUASH_LAND_MIN + impact / 1400, SQUASH_LAND_MIN, SQUASH_LAND_MAX)
+      n.squash = clamp(SQUASH_LAND_MIN + impact / 2200, SQUASH_LAND_MIN, SQUASH_LAND_MAX * SQUASH_LAND_SCALE)
       n.squashV = 0
-      n.hopV = LAND_BOUNCE
       if (n.mode !== 'sleep' && n.action === null) {
         n.action = 'alert'
         n.anim = 'alert'

@@ -269,7 +269,7 @@ would take about 0.5 s. While airborne:
   position matches the release position;
 - the shadow scales to 50% and fades to 45% at the top of a 320 px fall and
   returns as she lands, which indicates that she is airborne;
-- landing triggers a settle hop, an `alert`, and a squash scaled to the impact,
+- landing triggers an `alert` and a squash scaled to the impact,
   but only above `LAND_IMPACT`; a gentle placement triggers none of them.
 
 ## Pose
@@ -277,11 +277,19 @@ would take about 0.5 s. While airborne:
 Impulses are absorbed by a **damped spring** rather than being set and cleared:
 `SQUASH_STIFF` 260 with `SQUASH_DAMP` 17, integrated in sub-steps of at most 8 ms
 so a stalled frame (dt clamped to 100 ms) can never make it overshoot into a
-wobble. A landing compresses her (scaleY < 1, scaleX > 1) and the spring
-overshoots into a stretch on the way back; a take-off stretches her first.
+wobble. A take-off stretches her first (`SQUASH_JUMP`); a landing compresses her
+(scaleY < 1, scaleX > 1).
 
 `transform-origin` is `50% 100%` — her feet. Scaling about the centre would lift
 her off the ground on every impact.
+
+A landing **releases the spring from rest** and caps the compression
+(`SQUASH_LAND_SCALE` 0.6, and `impact / 2200` rather than `/ 1400`). Releasing
+from rest is the smallest excursion a linear spring allows; a kick in either
+direction only adds energy and deepens the stretch that follows (measured worst
+stretch after a fall to the floor: 1.7% from rest, 2.7% with a +30 kick, 7.5%
+with a -32 one). The bounce that used to be visible came from the landing hop
+(`LAND_BOUNCE`, since removed), not from the spring.
 
 ## Rendering
 

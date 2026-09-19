@@ -356,7 +356,27 @@ check('she reaches the floor', framesToLand >= 0, `landed after ${framesToLand} 
 // makes it a drift. Anything under 100 frames means the slow fall regressed.
 check('the descent is a slow fall, not a drop', framesToLand > 100, `${framesToLand} frames (~${(framesToLand * 16 / 1000).toFixed(2)}s)`)
 check('she lands exactly on the floor', state().bottom === 6, `bottom=${state().bottom}`)
-check('the landing is acknowledged with a settle hop', state().hopV > 0 || state().action === 'alert', `hopV=${state().hopV} action=${state().action}`)
+check('landing from leaf fall lands softly without a bounce', state().hopV === 0 && state().hop === 0, `hopV=${state().hopV} hop=${state().hop}`)
+check('landing is acknowledged with alert pose', state().action === 'alert', `action=${state().action}`)
+
+// The impact must not rebound her off the floor. Measured on the drawn offset
+// (hop) and on the spring: a damped spring released from rest at its compressed
+// extreme is the smallest excursion a linear spring can make, so any velocity
+// added at touchdown only deepens the stretch that follows. The bound sits just
+// above the measured 1.7% so re-adding a kick fails here.
+let landedRise = 0
+let landedMaxOvershoot = 0
+let prevBottom = state().bottom
+for (let i = 0; i < 120; i += 1) {
+  tick(1)
+  el = render()
+  const s = state()
+  if (s.bottom > prevBottom + 0.01) landedRise = Math.max(landedRise, s.bottom - 6)
+  if (s.squash < 0) landedMaxOvershoot = Math.min(landedMaxOvershoot, s.squash)
+  prevBottom = s.bottom
+}
+check('the landing never lifts her off the floor', landedRise < 0.01, `rise=${landedRise.toFixed(4)} px`)
+check('the landing does not rebound into a stretch', landedMaxOvershoot > -0.025, `overshoot=${landedMaxOvershoot.toFixed(3)}`)
 
 // --- hard fling tumbles, hard wall hit somersaults --------------------------
 tick(60)
