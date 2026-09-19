@@ -234,9 +234,8 @@ for (const r of runs) {
 }
 const longestHold = Math.max(...holdLengths)
 check('holds are real pauses, not twitches', longestHold >= 60, `longest hold ${longestHold} frames (${(longestHold * 16 / 1000).toFixed(1)}s)`)
-// 1200 ms floor + 2400 ms span + a beat's trailing open frame ~= 236 ticks. A
-// stall (the mode machine rewinding the hold) used to push this past 580.
-check('no hold stalls past the configured maximum', longestHold <= 260, `longest hold ${longestHold} frames (${(longestHold * 16 / 1000).toFixed(1)}s)`)
+// 2400 ms floor + 3000 ms span + a beat's trailing open frame ~= 360 ticks.
+check('no hold stalls past the configured maximum', longestHold <= 370, `longest hold ${longestHold} frames (${(longestHold * 16 / 1000).toFixed(1)}s)`)
 check('almost every idle run contains a proper hold', runsWithHold >= runs.length * 0.8, `${runsWithHold} of ${runs.length} runs`)
 
 // 6. it does not read as a fixed loop: the opening of the sample must not repeat

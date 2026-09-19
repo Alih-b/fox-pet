@@ -107,7 +107,7 @@ npm run verify:deployed  # the same suites against the deployed Package
 ```
 
 `npm test` runs: source shape, engine invariants (225000 ticks), idle/sit
-choreography, emitted CSS, and 60 interaction assertions. It needs nothing but
+choreography, emitted CSS, and 74 interaction assertions. It needs nothing but
 Node.
 
 `test:eyes` is the one script that wants Pillow, because measuring the atlas means
@@ -171,7 +171,7 @@ authored facing left, so `scaleX(-1)` mirrors it for rightward motion.
 
 | Input | Folio's response |
 |---|---|
-| Left-click | Poke — she waves, or wakes with a stretch if asleep |
+| Left-click | Poke — she waves, or wakes with a stretch if asleep, then stays put for 6–12 s |
 | Left-click mid-fall | **Catch** her: that spot becomes solid and she perches there |
 | Double-click | Toggle the sleep/loaf state |
 | Middle-click | Toggle the sleep/loaf state (same gesture, no double-tap) |
@@ -192,7 +192,7 @@ Neither is a fixed loop. Both are a **rest broken by occasional beats**, chosen 
 run time — a run plan per animation (`RUN_PLANS`):
 
 ```
-hold (1200-3600 ms, randomised)
+hold (2400-5400 ms, randomised)
   -> beat (blink / soft blink / double blink / glance / perk / look / startle)
   -> hold
   -> ...
@@ -227,6 +227,30 @@ the test cannot pass by hard-coding which frame is which — and it carries a
 control asserting that the upstream sequence *would* fail the same check. It
 also asserts that the drawn row always belongs to the animation that is running,
 which is how the `runAnim` regression below was caught.
+
+### Pacing
+
+Idle is the resting state; walk and sit are excursions from it. The mode machine
+draws between them at the end of each mode, and the weighting decides whether she
+reads as resting or as pacing:
+
+| mode | share of draws | duration |
+|---|---|---|
+| walk | 16% | 1.6–3.6 s |
+| sit | 28% | 4–9 s |
+| idle | 56% | 5–11 s |
+
+Both excursions return to an idle of 4–11 s. Draws and time are not the same
+thing: idle wins the majority of draws *and* lasts longer, so it takes about
+three quarters of the waking clock. An earlier weighting gave walking a 40% share
+with 2.4–6 s runs, which read as restlessness; over a simulated hour the awake
+mix is now idle 77%, sit 19%, walk 4%, and no single walk runs past 3.6 s.
+`simulate-engine.mjs` asserts those bounds so the mix cannot quietly slide back.
+
+A **left-click pauses her**: it plays the greeting and then holds an idle of
+6–12 s where she stands. Without that she waved and then carried on with whatever
+the mode machine had already chosen, so a click looked like it had been ignored —
+she would walk off mid-acknowledgement.
 
 ### The animation-switch trap
 

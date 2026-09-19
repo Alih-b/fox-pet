@@ -629,6 +629,35 @@ el = render()
 tick(30)
 el = render()
 
+// --- a click stops her, it does not just wave -------------------------------
+// A click used to play the greeting and then let the mode machine carry on with
+// whatever it had already chosen, so she would walk off mid-acknowledgement.
+ensureAwake()
+el = render()
+// Wait for her to be doing something other than resting, so the click has
+// something to interrupt. Which of walk/sit it is does not matter here.
+let busyMode = ''
+for (let i = 0; i < 20000; i += 1) {
+  tick(1)
+  if (state().mode !== 'idle' && state().mode !== 'sleep') { busyMode = state().mode; break }
+  if (i % 600 === 599) { fox().props.onContextMenu({ preventDefault() {} }); el = render() }
+}
+el = render()
+check('she is busy before the click', busyMode !== '', `mode=${state().mode}`)
+const xBeforeClick = state().x
+pointerDown(800, 300, { pointerId: 95 })
+pointerUp(800, 300, { pointerId: 95 })
+el = render()
+check('a click settles her into idle', state().mode === 'idle', `was ${busyMode}, now ${state().mode}`)
+check('a click stops her moving', state().vx === 0, `vx=${state().vx}`)
+const pausedFor = state().modeDur
+check('the pause is a long one', pausedFor >= 6000, `modeDur=${Math.round(pausedFor)}ms`)
+// She must still be idle when the greeting has finished, not just during it.
+for (let i = 0; i < 400; i += 1) tick(1)
+el = render()
+check('she is still idle after the greeting finishes', state().mode === 'idle', `mode=${state().mode} after ~6.4s`)
+check('she has not wandered during the pause', Math.abs(state().x - xBeforeClick) < 0.02, `moved ${Math.abs(state().x - xBeforeClick).toFixed(3)} of the frame`)
+
 let failed = 0
 for (const r of results) {
   if (!r.ok) failed += 1

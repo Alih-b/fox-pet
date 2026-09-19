@@ -132,8 +132,8 @@ window.__ModuleLoader__.load({
 			  idle: {
 			    row: 0,
 			    rest: 0,
-			    holdMin: 1200,
-			    holdSpan: 2400,
+			    holdMin: 2400,
+			    holdSpan: 3000,
 			    settle: null,
 			    beats: [
 			      { id: 'blink', weight: 34, seq: [1, 0], durs: [110, 120] },
@@ -236,7 +236,7 @@ window.__ModuleLoader__.load({
 			      squashV: 0,
 			      mode: 'idle',
 			      modeMs: 0,
-			      modeDur: 3200,
+			      modeDur: 4000,
 			      idleMs: 0,
 			      action: null,
 			      drag: false,
@@ -495,22 +495,24 @@ window.__ModuleLoader__.load({
 			        } else if (n.modeMs >= n.modeDur) {
 			          n.modeMs = 0
 			          const roll = rnd()
+			          // Idle is the resting state; walk and sit are excursions that return to
+			          // a long idle. Weighted the other way she reads as pacing.
 			          if (n.mode === 'walk') {
 			            n.mode = 'idle'
-			            n.modeDur = 1600 + rnd() * 2600
+			            n.modeDur = 5000 + rnd() * 6000
 			          } else if (n.mode === 'sit') {
 			            n.mode = 'idle'
-			            n.modeDur = 1200 + rnd() * 2200
-			          } else if (roll < 0.45) {
+			            n.modeDur = 4000 + rnd() * 5000
+			          } else if (roll < 0.16) {
 			            n.mode = 'walk'
-			            n.modeDur = 2400 + rnd() * 3600
+			            n.modeDur = 1600 + rnd() * 2000
 			            n.facing = rnd() < 0.5 ? -1 : 1
-			          } else if (roll < 0.72) {
+			          } else if (roll < 0.44) {
 			            n.mode = 'sit'
-			            n.modeDur = 3000 + rnd() * 4000
+			            n.modeDur = 4000 + rnd() * 5000
 			          } else {
 			            n.mode = 'idle'
-			            n.modeDur = 1500 + rnd() * 2500
+			            n.modeDur = 5000 + rnd() * 6000
 			          }
 			          if (n.action === null && n.anim !== n.mode) {
 			            n.anim = n.mode
@@ -535,12 +537,22 @@ window.__ModuleLoader__.load({
 			      return n
 			    }
 
+			    // Stop where she is and hold a calm idle, so a click is not just a wave she
+			    // walks out of.
+			    function pause(n, ms) {
+			      n.vx = 0
+			      n.mode = 'idle'
+			      n.modeMs = 0
+			      n.modeDur = ms
+			      n.idleMs = 0
+			    }
+
 			    function wake(n, action) {
 			      n.idleMs = 0
 			      if (n.mode === 'sleep') {
 			        n.mode = 'idle'
 			        n.modeMs = 0
-			        n.modeDur = 1800 + rnd() * 2000
+			        n.modeDur = 3500 + rnd() * 3500
 			        n.action = 'yawn'
 			        n.anim = 'yawn'
 			        n.frame = 0
@@ -798,7 +810,8 @@ window.__ModuleLoader__.load({
 			              return
 			            }
 			            wake(n, 'greet')
-			            if (n.hop === 0) n.hopV = 200
+			            if (n.squash === 0) n.squash = -SQUASH_JUMP * 0.5
+			            pause(n, 6000 + rnd() * 6000)
 			          })
 			          return
 			        }
