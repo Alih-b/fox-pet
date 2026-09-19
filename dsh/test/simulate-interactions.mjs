@@ -447,6 +447,34 @@ el = render()
 check('dropping her again restores the default floor', state().ground === 6, `ground=${state().ground}`)
 check('a purely vertical drag counts as a drag, not a click', state().ground === 6 && state().bottom > 6, `ground=${state().ground} bottom=${state().bottom}`)
 
+// --- catching a sleeping fox mid-fall does not wake her ----------------------
+tick(200)
+el = render()
+fox().props.onDoubleClick({ preventDefault() {} })
+el = render()
+check('sleeping before the lift', state().mode === 'sleep', `mode=${state().mode}`)
+pointerDown(800, 700, { pointerId: 74 })
+clock += 16
+pointerMove(800, 300, { pointerId: 74 })
+pointerUp(800, 300, { pointerId: 74 })
+el = render()
+// Run until she is genuinely airborne rather than guessing a tick count: the
+// fall is a drift, so a fixed number of frames is not a fixed height.
+let midFallTicks = -1
+for (let i = 0; i < 600; i += 1) {
+  tick(1)
+  el = render()
+  if (state().bottom < 400 && state().bottom > 40) { midFallTicks = i; break }
+}
+check('sleeping fox is caught genuinely mid-fall', midFallTicks >= 0, `after ${midFallTicks} ticks, bottom=${state().bottom.toFixed(1)}`)
+pointerDown(800, 300, { pointerId: 75 })
+el = render()
+pointerUp(800, 300, { pointerId: 75 })
+el = render()
+check('clicking sleeping fox mid-fall perches her', state().ground > 6, `ground=${state().ground}`)
+check('clicking sleeping fox mid-fall does not wake her', state().mode === 'sleep', `mode=${state().mode}`)
+check('sleeping perched fox settles into the sleep loop', state().anim === 'sleep' && state().action === null, `anim=${state().anim} action=${state().action}`)
+
 // --- pose: squash on landing, scaled about her feet -------------------------
 ensureAwake()
 el = render()

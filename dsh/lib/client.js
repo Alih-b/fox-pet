@@ -574,6 +574,15 @@ window.__ModuleLoader__.load({
 			      n.idleMs = 0
 			      n.squash = SQUASH_LAND_MIN
 			      n.squashV = 0
+			      if (n.mode === 'sleep') {
+			        // Settle her straight into the sleep loop: the yawn that opened the sleep
+			        // would otherwise keep playing as an awake pose.
+			        n.action = null
+			        n.anim = 'sleep'
+			        n.frame = 0
+			        n.acc = 0
+			        return
+			      }
 			      if (n.action === null) {
 			        n.action = 'alert'
 			        n.anim = 'alert'
