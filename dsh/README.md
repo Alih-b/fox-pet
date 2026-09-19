@@ -315,6 +315,28 @@ stretch after a fall to the floor: 1.7% from rest, 2.7% with a +30 kick, 7.5%
 with a -32 one). The bounce that used to be visible came from the landing hop
 (`LAND_BOUNCE`, since removed), not from the spring.
 
+## Gaze — not implemented, and why
+
+Her eyes do **not** follow the pointer. Four attempts were made and each was
+visibly wrong, so it was removed rather than shipped. The reason is the artwork:
+she is one flat 120x130 sprite with no eye layer, the eye opening is only about
+15.6 x 11.9 px, and its bottom edge sits roughly **two pixels** above the cream
+muzzle. The idle row's open-eye frames are near-identical, so there is no
+pre-drawn gaze to switch to, and the directional frames live in the alert row,
+which is a different body pose.
+
+Moving the eye on a flat sprite means clipping it, and the clip boundary is where
+each attempt failed: a hand-drawn pupil either hides inside the painted one or
+covers the iris; a clip smaller than the eye tears it; a clip containing the eye
+drags the muzzle (254/255 worst change in that region); feathering the clip to
+hide the seam blends the shifted eye with the original and reads as two
+overlapping eyes. A hard boundary shows a seam and a soft one shows a double
+image, so with two pixels of clearance there is no third option.
+
+Making it work needs artwork rather than code: the iris and pupil as their own
+atlas cells, or a drawn gaze set in the idle body, so that looking becomes a
+frame choice instead of a pixel shift.
+
 ## Rendering
 
 Three things keep the sprite smooth rather than laggy or ghosted.
