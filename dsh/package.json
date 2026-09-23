@@ -3,7 +3,28 @@
   "version": "1.0.0",
   "private": true,
   "description": "Folio the fox — a companion pet for the DeepSeek Harness web UI",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "cordis",
+    "desktop-pet",
+    "web-ui",
+    "companion",
+    "animation"
+  ],
   "license": "MIT",
+  "author": "Alih-b",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alih-b/fox-pet.git",
+    "directory": "dsh"
+  },
+  "homepage": "https://github.com/Alih-b/fox-pet/tree/main/dsh#readme",
+  "bugs": {
+    "url": "https://github.com/Alih-b/fox-pet/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
