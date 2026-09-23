@@ -729,6 +729,18 @@ Item {
 
   // ---------------------------------------------------- timers
   Timer {
+    id: sleepRecoveryTimer
+    interval: 45000
+    repeat: false
+    onTriggered: {
+      if (service.manualSleep && service.petState === service.stateSleep) {
+        service.manualSleep = false
+        service.startAction(service.stateYawn, service.durationFor(service.stateYawn))
+      }
+    }
+  }
+
+  Timer {
     id: actionTimer
     interval: 2000
     repeat: false
@@ -1004,6 +1016,8 @@ Item {
       return
     }
     if (petState === stateSleep) {
+      manualSleep = false
+      sleepRecoveryTimer.stop()
       startAction(stateYawn, durationFor(stateYawn))
       return
     }
@@ -1019,6 +1033,7 @@ Item {
 
   // Called by the panel's MouseArea on press.
   function cancelSleep() {
+    sleepRecoveryTimer.stop()
     if (manualSleep) manualSleep = false
   }
 
@@ -1032,6 +1047,7 @@ Item {
     movementPhase = physicsEnabled && positionY < groundY ? "falling" : "grounded"
     contactAge = 0
     manualSleep = true
+    sleepRecoveryTimer.restart()
     startAction(stateSleep, 0)
     saveDebounce.restart()
   }

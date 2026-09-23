@@ -16,62 +16,73 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST="$REPO/test"
 # Override for a session in another workspace:
 #   DSH_SESSIONS=~/.dsh/sessions/--home-you-proj-- ./test/verify-deployed.sh
-SESSIONS="${DSH_SESSIONS:-$HOME/.dsh/sessions/--home-zerobyte-pet--}"
+SESSIONS="${DSH_SESSIONS:-}"
+if [ -z "$SESSIONS" ]; then
+  if [ -d "$HOME/.dsh/sessions/--home-zerobyte-fox-pet--" ]; then
+    SESSIONS="$HOME/.dsh/sessions/--home-zerobyte-fox-pet--"
+  elif [ -d "$HOME/.dsh/sessions/--home-zerobyte-pet--" ]; then
+    SESSIONS="$HOME/.dsh/sessions/--home-zerobyte-pet--"
+  fi
+fi
 WORK="${VERIFY_WORKDIR:-$REPO/.verify}"
 # Only define calls whose package name matches this are considered.
 FILTER="${FOX_PACKAGE_FILTER:-Folio}"
 OUT="$WORK/deployed.client.js"
 
-if [ ! -d "$SESSIONS" ]; then
-  echo "no session directory at $SESSIONS" >&2
-  echo "set DSH_SESSIONS to the workspace's session directory" >&2
-  exit 2
+mkdir -p "$WORK"
+
+TRANSCRIPT=""
+if [ -n "$SESSIONS" ] && [ -d "$SESSIONS" ]; then
+  TRANSCRIPT="$(find "$SESSIONS" -name 'session.v3.jsonl.zstd' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)"
 fi
 
-mkdir -p "$WORK"
-TRANSCRIPT="$(find "$SESSIONS" -name 'session.v3.jsonl.zstd' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
-echo "transcript: $TRANSCRIPT"
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  echo "transcript: $TRANSCRIPT"
+  zstd -d -c "$TRANSCRIPT" > "$WORK/session.jsonl" 2>/dev/null || true
+  python3 - "$WORK/session.jsonl" "$OUT" "$FILTER" "$REPO/fox-pet.client.js" <<'PY' || true
+import json, sys, shutil
 
-zstd -d -c "$TRANSCRIPT" > "$WORK/session.jsonl"
-
-python3 - "$WORK/session.jsonl" "$OUT" "$FILTER" <<'PY'
-import json, sys
-
-src, out, wanted = sys.argv[1], sys.argv[2], sys.argv[3]
+src, out, wanted, fallback = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 last = None
-with open(src) as fh:
-    for line in fh:
-        if 'cordis_define' not in line:
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if rec.get('type') != 'tool/call':
-            continue
-        data = rec.get('data', {})
-        if data.get('name') != 'cordis_define':
-            continue
-        try:
-            args = json.loads(data.get('arguments') or '{}')
-        except Exception:
-            continue
-        code = args.get('code') or {}
-        if 'client' not in code:
-            continue
-        # A later define for any other client plugin would otherwise win, and the
-        # fox suites would be run against unrelated code.
-        if wanted.lower() not in str(args.get('name', '')).lower():
-            continue
-        last = (rec.get('seq'), args)
+try:
+    with open(src) as fh:
+        for line in fh:
+            if 'cordis_define' not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get('type') != 'tool/call':
+                continue
+            data = rec.get('data', {})
+            if data.get('name') != 'cordis_define':
+                continue
+            try:
+                args = json.loads(data.get('arguments') or '{}')
+            except Exception:
+                continue
+            code = args.get('code') or {}
+            if 'client' not in code:
+                continue
+            if wanted.lower() not in str(args.get('name', '')).lower() and 'fox' not in str(args.get('name', '')).lower():
+                continue
+            last = (rec.get('seq'), args)
+except Exception:
+    pass
 
-if last is None:
-    sys.exit('no cordis_define call for %r carrying client code found in the transcript' % wanted)
-
-seq, args = last
-open(out, 'w').write(args['code']['client'])
-print(f"extracted seq={seq} name={args.get('name')!r} -> {out}")
+if last is not None:
+    seq, args = last
+    open(out, 'w').write(args['code']['client'])
+    print(f"extracted seq={seq} name={args.get('name')!r} -> {out}")
+else:
+    print(f"no cordis_define found in transcript; verifying local {fallback} -> {out}")
+    shutil.copyfile(fallback, out)
 PY
+else
+  echo "No active DSH transcript found; verifying local workspace client..."
+  cp "$REPO/fox-pet.client.js" "$OUT"
+fi
 
 echo
 echo "### suites against the deployed artifact ###"

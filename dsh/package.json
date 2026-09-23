@@ -1,11 +1,34 @@
 {
   "name": "dsh-fox-pet",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Folio the fox, ported from the Omarchy plugin to a Dynamic Cordis plugin for DeepSeek Harness",
+  "description": "Folio the fox — a companion pet for the DeepSeek Harness web UI",
   "license": "MIT",
   "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "cordis.patch.yml",
+    "fox-pet.client.js",
+    "fox-pet.host.js",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
   "scripts": {
+    "build:client": "node test/build-bundle.mjs",
     "test": "node test/simulate-source-shape.mjs && node test/simulate-engine.mjs && node test/simulate-idle.mjs && node test/simulate-render-styles.mjs && node test/simulate-interactions.mjs",
     "test:eyes": "node test/verify-eye-state.mjs",
     "idle:dump": "node test/dump-idle.mjs",

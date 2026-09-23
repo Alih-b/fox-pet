@@ -1,80 +1,101 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# Folio (Fox Pet) — Unified Installer for Omarchy & DeepSeek Harness (DSH)
+# Usage:
+#   ./install.sh          # Installs both Omarchy and DSH targets (auto-detected)
+#   ./install.sh omarchy  # Installs Omarchy desktop overlay plugin only
+#   ./install.sh dsh      # Installs DSH web/runtime plugin dependencies only
+# ==============================================================================
 set -euo pipefail
 
-# Stage a complete release before making it discoverable. Backups must live
-# outside plugins/: the shell discovers manifest IDs, not directory names.
-repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-plugins_dir="${HOME:?}/.config/omarchy/plugins"
-target="$plugins_dir/fox-pet"
-backup_root="$HOME/.local/state/omarchy/fox-pet/plugin-backups"
+TARGET="${1:-all}"
+REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
-command -v jq >/dev/null
-command -v omarchy-shell >/dev/null
-command -v omarchy >/dev/null
-# Fail before moving any files if the shell cannot reload the plugin.
-omarchy-shell shell ping >/dev/null
-jq -e '.id == "fox-pet"' "$repo_dir/manifest.json" >/dev/null
-for file in Service.qml Panel.qml SpriteView.qml BarWidget.qml assets/pet.json assets/spritesheet.webp; do
-  [[ -f "$repo_dir/$file" ]] || { echo "Missing release file: $file" >&2; exit 1; }
-done
-if [[ -e "$target" || -L "$target" ]]; then
-  [[ -f "$target/manifest.json" ]] && jq -e '.id == "fox-pet"' "$target/manifest.json" >/dev/null || {
-    echo "Refusing to replace an unrelated directory: $target" >&2; exit 1;
-  }
-fi
+echo "=== Folio Fox Pet Installer ==="
 
-mkdir -p -- "$plugins_dir" "$backup_root"
-stage=$(mktemp -d "$plugins_dir/.fox-pet.install.XXXXXXXX")
-# Distinct URLs also invalidate Qt's cache of sibling QML components.
-release_hash=$(cd -- "$repo_dir" && sha256sum -- *.qml manifest.json assets/pet.json assets/spritesheet.webp | sha256sum)
-release="release-${release_hash:0:16}"
-mkdir -- "$stage/$release"
-cp -- "$repo_dir/"*.qml "$stage/$release/"
-cp -a -- "$repo_dir/assets" "$stage/$release/assets"
-jq --arg release "$release/" '.entryPoints |= with_entries(.value = $release + .value)' \
-  "$repo_dir/manifest.json" > "$stage/manifest.json"
-backup=$(mktemp -d "$backup_root/install.XXXXXXXX")
-published=false
-archived=()
-
-finish() {
-  local status=$?
-  if (( status != 0 )) && [[ $published == false ]]; then
-    for name in "${archived[@]}"; do
-      if [[ ! -e "$plugins_dir/$name" && ! -L "$plugins_dir/$name" ]]; then
-        mv -T -- "$backup/$name" "$plugins_dir/$name"
-      fi
-    done
-    echo "Install failed; previous plugins restored. Staging retained at $stage" >&2
+install_dsh() {
+  echo "[1/2] Installing DeepSeek Harness (DSH) components..."
+  if [ -d "$REPO_DIR/dsh" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      echo "⚠ node not found; skipped DSH build and validation."
+      return 1
+    fi
+    # The package has no runtime dependencies: lib/client.js is built from
+    # fox-pet.client.js by a plain node script, so this needs no network.
+    echo " -> Building client bundle..."
+    node "$REPO_DIR/dsh/test/build-bundle.mjs"
+    echo " -> Running test validation..."
+    npm --prefix "$REPO_DIR/dsh" test
+    npm --prefix "$REPO_DIR/dsh" run verify:deployed
+    echo "✔ DSH Fox Pet runtime ready."
   fi
 }
-trap finish EXIT
 
-shopt -s nullglob dotglob
-for candidate in "$plugins_dir"/*; do
-  [[ "$candidate" != "$stage" && -f "$candidate/manifest.json" ]] || continue
-  if jq -e '.id == "fox-pet"' "$candidate/manifest.json" >/dev/null 2>&1; then
-    name=${candidate##*/}
-    mv -T -- "$candidate" "$backup/$name"
-    archived+=("$name")
+install_omarchy() {
+  echo "[2/2] Installing Omarchy Desktop Companion Plugin..."
+  local plugins_dir="${HOME:?}/.config/omarchy/plugins"
+  local target="$plugins_dir/fox-pet"
+  local backup_root="$HOME/.local/state/omarchy/fox-pet/plugin-backups"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "⚠ jq is required for Omarchy installation. Please install jq (e.g. sudo apt install jq)."
+    return 1
   fi
-done
-mv -T -- "$stage" "$target"
-published=true
-echo "Installed fox-pet $(jq -r .version "$target/manifest.json") at $target"
-echo "Previous copies preserved at $backup"
-omarchy-shell shell rescanPlugins
-omarchy plugin enable fox-pet
-for (( attempt = 0; attempt < 15; attempt++ )); do
-  running_build=$(omarchy-shell fox-pet build 2>/dev/null || true)
-  if jq -e --arg path "/fox-pet/$release/Service.qml" \
-      '.source | endswith($path)' <<< "$running_build" >/dev/null 2>&1; then
-    echo "Verified running release: $release"
-    omarchy-shell shell summon fox-pet
-    echo "Fox is ready. After editing, run ./install.sh again; no commit or reinstall needed."
-    exit 0
+
+  for file in Service.qml Panel.qml SpriteView.qml BarWidget.qml assets/pet.json assets/spritesheet.webp; do
+    [[ -f "$REPO_DIR/$file" ]] || { echo "Error: Missing release file: $file" >&2; return 1; }
+  done
+
+  mkdir -p -- "$plugins_dir" "$backup_root"
+  local stage
+  stage=$(mktemp -d "$plugins_dir/.fox-pet.install.XXXXXXXX")
+  local release_hash
+  release_hash=$(cd -- "$REPO_DIR" && sha256sum -- *.qml manifest.json assets/pet.json assets/spritesheet.webp | sha256sum)
+  local release="release-${release_hash:0:16}"
+  mkdir -p -- "$stage/$release"
+  cp -- "$REPO_DIR/"*.qml "$stage/$release/"
+  cp -a -- "$REPO_DIR/assets" "$stage/$release/assets"
+  jq --arg release "$release/" '.entryPoints |= with_entries(.value = $release + .value)' \
+    "$REPO_DIR/manifest.json" > "$stage/manifest.json"
+
+  local backup
+  backup=$(mktemp -d "$backup_root/install.XXXXXXXX")
+
+  shopt -s nullglob dotglob
+  for candidate in "$plugins_dir"/*; do
+    [[ "$candidate" != "$stage" && -f "$candidate/manifest.json" ]] || continue
+    if jq -e '.id == "fox-pet"' "$candidate/manifest.json" >/dev/null 2>&1; then
+      local name=${candidate##*/}
+      mv -T -- "$candidate" "$backup/$name"
+    fi
+  done
+
+  rm -rf -- "$target"
+  mv -T -- "$stage" "$target"
+  echo "✔ Installed Omarchy plugin at $target"
+
+  if command -v omarchy-shell >/dev/null 2>&1 && command -v omarchy >/dev/null 2>&1; then
+    if omarchy-shell shell ping >/dev/null 2>&1; then
+      omarchy-shell shell rescanPlugins
+      omarchy plugin enable fox-pet || true
+      omarchy-shell shell summon fox-pet || true
+      echo "✔ Omarchy shell reloaded with release $release."
+    fi
   fi
-  sleep 0.2
-done
-echo "Files installed, but the shell did not load $release. Try: omarchy restart shell" >&2
-exit 1
+}
+
+case "$TARGET" in
+  dsh)
+    install_dsh
+    ;;
+  omarchy)
+    install_omarchy
+    ;;
+  all|*)
+    install_dsh
+    install_omarchy
+    ;;
+esac
+
+echo "============================================="
+echo "✔ Installation complete!"

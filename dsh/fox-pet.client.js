@@ -66,6 +66,31 @@ const FLING_TUMBLE = 1.15
 const WALL_THUD = 0.5
 const EDGE_PAD = 10 // px of clearance between her edge and the frame
 
+// Natural motion. The atlas steps at 5-8 fps, so the frames alone read as a
+// slide: nothing carries her weight between them. These two continuous
+// channels sit on top of the frame grid and are what make her look animate
+// rather than cut out:
+//
+//  * lean — a spring, so she tips into travel and settles back with
+//           follow-through instead of snapping upright when she stops;
+//  * gait — a vertical bounce per footfall, so the walk is grounded.
+//
+// Deliberately NOT here: anything that eases the left/right mirror. A side-view
+// sprite that passes through the narrow axis flattens to a line and mirrors,
+// which reads as a coin flip, not a turn. She mirrors instantly instead, and the
+// only thing that moves across a reversal is the lean, which swings smoothly
+// because it is a spring.
+const LEAN_STIFF = 250
+const LEAN_DAMP = 20
+const LEAN_MAX = 0.055 // rad (~3.2 deg): enough to read, never a tilt
+// Saturation speed. This has to sit just above the walk (118 px/s) or a normal
+// stride leans by a fraction of a degree and the channel does nothing: at 170 a
+// walk holds ~2.2 deg and a hard fling saturates.
+const LEAN_SPEED_PX = 170
+const BOB_AMP = 1.6 // px of bounce per footfall
+const BOB_PERIOD = 375 // ms per footfall, matching the 6-frame trot
+const ANIM_SETTLE = 0.04 // a small compression when the animation changes
+
 const ROWS = {
   idle: { row: 0, frames: 7, fps: 5, sequence: [0, 1, 2, 1, 0, 1, 2, 1, 0, 4, 0, 5, 0, 6], durations: [3600, 90, 110, 90, 3600, 90, 110, 90, 4200, 140, 3800, 120, 4000, 160] },
   walk: { row: 1, frames: 8, fps: 8, sequence: [1, 2, 3, 4, 5, 6] },
@@ -205,6 +230,11 @@ return {
       bottom: GROUND,
       ground: GROUND, // the surface she stands on; a click mid-fall moves it
       facing: -1,
+      // Render-only motion channels (see the constants above).
+      lean: 0,
+      leanV: 0,
+      gait: 0,
+      motionX: 0,
       vx: 0,
       anim: 'idle',
       frame: 0,
@@ -312,6 +342,12 @@ return {
         n.cell = spec.seq[0]
         n.row = spec.row
       }
+      // A row swap is a teleport: the new pose has different feet, a different
+      // height and different weight. A small compression on the change turns it
+      // into a step she takes rather than one she is suddenly in. It rides the
+      // same spring as a landing, so it settles instead of clicking.
+      n.squash = clamp(n.squash + ANIM_SETTLE, 0, SQUASH_LAND_MAX)
+      n.squashV = 0
       n.animLoaded = n.anim
     }
 
@@ -395,17 +431,48 @@ return {
       n.cell = a.seq[n.frame] === undefined ? 0 : a.seq[n.frame]
       n.row = a.row
 
+      // How fast she is actually travelling, in screen px/s. A walk and a fling
+      // are the same shape here, so one lean spring covers both. Read from `s`
+      // rather than this tick's result: it is a 16 ms lag the eye cannot see,
+      // and it keeps the spring independent of the order things move in below.
+      let motionX = 0
+      if (s.drag === false) {
+        if (s.anim === 'walk' && s.mode === 'walk' && s.vx === 0) {
+          motionX = s.facing * WALK_PX_PER_SEC
+        } else if (s.vx !== 0) {
+          motionX = s.vx * (stageW > 0 ? stageW : 1600)
+        }
+      }
+      n.motionX = motionX
+      const leanTarget = clamp(motionX / LEAN_SPEED_PX, -1, 1) * LEAN_MAX
+
       // Sub-stepped so a stalled frame (dt clamped to 100 ms) can never make the
-      // spring overshoot into a wobble.
+      // springs overshoot into a wobble.
       const steps = Math.min(12, Math.ceil(dt / 8))
       const h = dt / steps / 1000
       for (let i = 0; i < steps; i += 1) {
         n.squashV = n.squashV + (-SQUASH_STIFF * n.squash - SQUASH_DAMP * n.squashV) * h
         n.squash = n.squash + n.squashV * h
+        // The lean is a spring, not a lerp: driven to the target it arrives with
+        // a little follow-through, which is what sells the stop.
+        n.leanV = n.leanV + (-LEAN_STIFF * (n.lean - leanTarget) - LEAN_DAMP * n.leanV) * h
+        n.lean = n.lean + n.leanV * h
       }
       if (n.squash < 0.0004 && n.squash > -0.0004 && n.squashV < 0.01 && n.squashV > -0.01) {
         n.squash = 0
         n.squashV = 0
+      }
+      if (n.lean < 0.0004 && n.lean > -0.0004 && n.leanV < 0.01 && n.leanV > -0.01) {
+        n.lean = 0
+        n.leanV = 0
+      }
+
+      // The gait clock only advances on a real walk, and resets when it ends so
+      // the next walk starts its bounce from the ground rather than mid-step.
+      if (n.anim === 'walk' && n.mode === 'walk' && n.vx === 0) {
+        n.gait = s.gait + dt
+      } else {
+        n.gait = 0
       }
 
       if (n.hop > 0 || n.hopV !== 0) {
@@ -478,30 +545,45 @@ return {
         if (n.mode !== 'sleep' && n.idleMs > SLEEP_AFTER) {
           n.mode = 'sleep'
           n.modeMs = 0
-          n.modeDur = 1e9
+          // A nap is bounded. Leaving this at infinity is what kept her asleep
+          // until the user clicked: she had no way back to the surface on her
+          // own. 25-50 s reads as a real nap and still feels unhurried.
+          n.modeDur = 25000 + rnd() * 25000
           n.action = 'yawn'
           n.anim = 'yawn'
           n.frame = 0
           n.acc = 0
         } else if (n.modeMs >= n.modeDur) {
           n.modeMs = 0
-          const roll = rnd()
-          if (n.mode === 'walk') {
+          if (n.mode === 'sleep') {
+            // The nap has run its course: stretch and yawn back up into idle
+            // instead of waiting for input.
             n.mode = 'idle'
-            n.modeDur = 1600 + rnd() * 2600
-          } else if (n.mode === 'sit') {
-            n.mode = 'idle'
-            n.modeDur = 1200 + rnd() * 2200
-          } else if (roll < 0.45) {
-            n.mode = 'walk'
-            n.modeDur = 2400 + rnd() * 3600
-            n.facing = rnd() < 0.5 ? -1 : 1
-          } else if (roll < 0.72) {
-            n.mode = 'sit'
-            n.modeDur = 3000 + rnd() * 4000
+            n.modeDur = 2000 + rnd() * 3000
+            n.idleMs = 0
+            n.action = 'yawn'
+            n.anim = 'yawn'
+            n.frame = 0
+            n.acc = 0
           } else {
-            n.mode = 'idle'
-            n.modeDur = 1500 + rnd() * 2500
+            const roll = rnd()
+            if (n.mode === 'walk') {
+              n.mode = 'idle'
+              n.modeDur = 1600 + rnd() * 2600
+            } else if (n.mode === 'sit') {
+              n.mode = 'idle'
+              n.modeDur = 1200 + rnd() * 2200
+            } else if (roll < 0.45) {
+              n.mode = 'walk'
+              n.modeDur = 2400 + rnd() * 3600
+              n.facing = rnd() < 0.5 ? -1 : 1
+            } else if (roll < 0.72) {
+              n.mode = 'sit'
+              n.modeDur = 3000 + rnd() * 4000
+            } else {
+              n.mode = 'idle'
+              n.modeDur = 1500 + rnd() * 2500
+            }
           }
           if (n.action === null && n.anim !== n.mode) {
             n.anim = n.mode
@@ -551,7 +633,8 @@ return {
       n.vx = 0
       n.mode = 'sleep'
       n.modeMs = 0
-      n.modeDur = 1e9
+      // A tucked-in fox rests long enough to feel settled, then wakes herself.
+      n.modeDur = 15000 + rnd() * 15000
       n.action = 'yawn'
       n.anim = 'yawn'
       n.frame = 0
@@ -839,6 +922,10 @@ return {
           n.hopV = 0
           n.squash = 0
           n.squashV = 0
+          // Bring her home is a full reset, so the nap clock restarts too.
+          // Without this the mode machine could expire the previous sleep on
+          // the very next tick and cut the homecoming animation short.
+          n.modeMs = 0
           wake(n, null)
         })
       }
@@ -911,11 +998,23 @@ return {
       const depth = clamp(lift / 320, 0, 1)
       const swayAmp = clamp(lift / 60, 0, 1) * FALL_SWAY_PX
       const sway = lift > 0.5 ? Math.sin((s.swayPhase / FALL_SWAY_PERIOD) * 2 * Math.PI) * swayAmp : 0
-      const stretched = 1 + s.squash
-      const squashed = 1 - s.squash
+      // Asleep she is not frozen: a slow thoracic heave rides on top of the
+      // pose spring, so the sleeping row breathes instead of holding a still.
+      // Volume-conserving: what she gains in height she gives back in width.
+      const breath = s.mode === 'sleep' ? Math.sin((s.modeMs / 2200) * 2 * Math.PI) * 0.0315 : 0
+      const stretched = 1 + s.squash - breath * 0.5
+      const squashed = 1 - s.squash + breath
+
+      // The gait bounce, only while a real walk is driving the legs. One rise
+      // and fall per footfall, so the sprite stops looking like it is sliding.
+      const walking = s.anim === 'walk' && s.mode === 'walk' && s.vx === 0
+      const bob = walking ? Math.sin((s.gait / BOB_PERIOD) * 2 * Math.PI) * BOB_AMP : 0
 
       const positioned = stageW > 0
       const px = positioned ? s.x * stageW - CW / 2 + sway : 0
+      // rotate() sits before scaleX() so the tilt is applied in screen space and
+      // does not mirror with her: leaning into travel looks the same both ways.
+      const motion = 'rotate(' + s.lean + 'rad) scaleX(' + (s.facing * stretched) + ') scaleY(' + squashed + ')'
 
       const foxStyle = {
         position: 'absolute',
@@ -924,8 +1023,8 @@ return {
         width: CW + 'px',
         height: CH + 'px',
         transform: positioned
-          ? 'translate3d(' + px + 'px,0,0) scaleX(' + (s.facing * stretched) + ') scaleY(' + squashed + ')'
-          : 'translateX(-50%) scaleX(' + (s.facing * stretched) + ') scaleY(' + squashed + ')',
+          ? 'translate3d(' + px + 'px,' + bob + 'px,0) ' + motion
+          : 'translateX(-50%) ' + motion,
         // Scale about her feet, so a squash never lifts her off the surface.
         transformOrigin: '50% 100%',
         pointerEvents: 'auto',
