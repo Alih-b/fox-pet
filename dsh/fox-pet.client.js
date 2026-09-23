@@ -47,7 +47,6 @@ const FALL_TERMINAL = 120
 const FALL_SWAY_PX = 16
 const FALL_SWAY_PERIOD = 900 // ms for one full left-right-left swing
 const LAND_IMPACT = 45
-const LAND_BOUNCE = 240
 
 // Pose. An impulse from a landing or a take-off is absorbed by a damped spring,
 // so she compresses on impact and overshoots gently back to neutral.
@@ -56,6 +55,10 @@ const SQUASH_DAMP = 17
 const SQUASH_LAND_MIN = 0.08
 const SQUASH_LAND_MAX = 0.26
 const SQUASH_JUMP = 0.14
+// Landing compression, capped below the take-off stretch. Measured worst stretch
+// after a fall to the floor: 1.7%, against 2.7% with a +30 release velocity and
+// 7.5% with a -32 one, so the spring is released from rest.
+const SQUASH_LAND_SCALE = 0.6
 
 // Momentum. Exponential decay and walls that absorb, instead of the old model
 // that bled 7% of speed per 50 ms tick and reflected at 45%.
@@ -147,8 +150,8 @@ const RUN_PLANS = {
   idle: {
     row: 0,
     rest: 0,
-    holdMin: 1200,
-    holdSpan: 2400,
+    holdMin: 2400,
+    holdSpan: 3000,
     settle: null,
     beats: [
       { id: 'blink', weight: 34, seq: [1, 0], durs: [110, 120] },
@@ -256,7 +259,7 @@ return {
       squashV: 0,
       mode: 'idle',
       modeMs: 0,
-      modeDur: 3200,
+      modeDur: 4000,
       idleMs: 0,
       action: null,
       drag: false,
@@ -288,11 +291,10 @@ return {
       settle(n)
     }
 
-    // Land with an impact: compress, and let the spring bring her back.
+    // Land with an impact: absorb it, never return it.
     function touchdown(n, impact) {
-      n.squash = clamp(SQUASH_LAND_MIN + impact / 1400, SQUASH_LAND_MIN, SQUASH_LAND_MAX)
+      n.squash = clamp(SQUASH_LAND_MIN + impact / 2200, SQUASH_LAND_MIN, SQUASH_LAND_MAX * SQUASH_LAND_SCALE)
       n.squashV = 0
-      n.hopV = LAND_BOUNCE
       if (n.mode !== 'sleep' && n.action === null) {
         n.action = 'alert'
         n.anim = 'alert'
@@ -567,22 +569,24 @@ return {
             n.acc = 0
           } else {
             const roll = rnd()
+            // Idle is the resting state; walk and sit are excursions that return to
+            // a long idle. Weighted the other way she reads as pacing.
             if (n.mode === 'walk') {
               n.mode = 'idle'
-              n.modeDur = 1600 + rnd() * 2600
+              n.modeDur = 5000 + rnd() * 6000
             } else if (n.mode === 'sit') {
               n.mode = 'idle'
-              n.modeDur = 1200 + rnd() * 2200
-            } else if (roll < 0.45) {
+              n.modeDur = 4000 + rnd() * 5000
+            } else if (roll < 0.16) {
               n.mode = 'walk'
-              n.modeDur = 2400 + rnd() * 3600
+              n.modeDur = 1600 + rnd() * 2000
               n.facing = rnd() < 0.5 ? -1 : 1
-            } else if (roll < 0.72) {
+            } else if (roll < 0.44) {
               n.mode = 'sit'
-              n.modeDur = 3000 + rnd() * 4000
+              n.modeDur = 4000 + rnd() * 5000
             } else {
               n.mode = 'idle'
-              n.modeDur = 1500 + rnd() * 2500
+              n.modeDur = 5000 + rnd() * 6000
             }
           }
           if (n.action === null && n.anim !== n.mode) {
@@ -608,12 +612,22 @@ return {
       return n
     }
 
+    // Stop where she is and hold a calm idle, so a click is not just a wave she
+    // walks out of.
+    function pause(n, ms) {
+      n.vx = 0
+      n.mode = 'idle'
+      n.modeMs = 0
+      n.modeDur = ms
+      n.idleMs = 0
+    }
+
     function wake(n, action) {
       n.idleMs = 0
       if (n.mode === 'sleep') {
         n.mode = 'idle'
         n.modeMs = 0
-        n.modeDur = 1800 + rnd() * 2000
+        n.modeDur = 3500 + rnd() * 3500
         n.action = 'yawn'
         n.anim = 'yawn'
         n.frame = 0
@@ -650,6 +664,15 @@ return {
       n.idleMs = 0
       n.squash = SQUASH_LAND_MIN
       n.squashV = 0
+      if (n.mode === 'sleep') {
+        // Settle her straight into the sleep loop: the yawn that opened the sleep
+        // would otherwise keep playing as an awake pose.
+        n.action = null
+        n.anim = 'sleep'
+        n.frame = 0
+        n.acc = 0
+        return
+      }
       if (n.action === null) {
         n.action = 'alert'
         n.anim = 'alert'
@@ -863,7 +886,8 @@ return {
               return
             }
             wake(n, 'greet')
-            if (n.hop === 0) n.hopV = 200
+            if (n.squash === 0) n.squash = -SQUASH_JUMP * 0.5
+            pause(n, 6000 + rnd() * 6000)
           })
           return
         }
@@ -922,10 +946,6 @@ return {
           n.hopV = 0
           n.squash = 0
           n.squashV = 0
-          // Bring her home is a full reset, so the nap clock restarts too.
-          // Without this the mode machine could expire the previous sleep on
-          // the very next tick and cut the homecoming animation short.
-          n.modeMs = 0
           wake(n, null)
         })
       }

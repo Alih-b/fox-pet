@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build:client": "node test/build-bundle.mjs",
-    "test": "node test/simulate-source-shape.mjs && node test/simulate-engine.mjs && node test/simulate-idle.mjs && node test/simulate-render-styles.mjs && node test/simulate-interactions.mjs",
+    "test": "node test/simulate-source-shape.mjs && node test/simulate-bundle.mjs && node test/simulate-engine.mjs && node test/simulate-idle.mjs && node test/simulate-render-styles.mjs && node test/simulate-interactions.mjs",
     "test:eyes": "node test/verify-eye-state.mjs",
     "idle:dump": "node test/dump-idle.mjs",
     "verify:deployed": "./test/verify-deployed.sh"

@@ -5,6 +5,8 @@
 // module system serves from `exports["./client"]`. Building it here keeps
 // fox-pet.client.js the single source of truth: the suites test that file, and
 // this script only wraps it.
+//
+//   node test/build-bundle.mjs
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -18,6 +20,9 @@ const PACKAGE_ID = 'dsh-fox-pet'
 
 const source = readFileSync(sourcePath, 'utf8')
 
+// The wrapper hands the body `require` and React, and takes the plugin object
+// the body returns. The body is a function body: it opens with consts and ends
+// with `return { inject, apply }`, which is exactly what the IIFE needs.
 if (!/\nreturn \{\n/.test(source)) {
   throw new Error('fox-pet.client.js does not end in a `return { ... }` plugin object')
 }
@@ -40,5 +45,5 @@ ${indent(source.trimEnd(), '\t\t\t')}
 `
 
 mkdirSync(outDir, { recursive: true })
-writeFileSync(outPath, bundle, 'utf8')
-console.log(`wrote ${outPath} (${Buffer.byteLength(bundle)} bytes)`)
+writeFileSync(outPath, bundle)
+console.log(`wrote ${outPath} (${bundle.length} bytes) from ${sourcePath}`)

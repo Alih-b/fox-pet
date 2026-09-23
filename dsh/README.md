@@ -46,6 +46,57 @@ function bodies, not modules: the host one is the body of `code.host` and the
 client one is the body of `code.client`. That is why `simulate-source-shape.mjs`
 stands in for the parse and lint checks a module would normally get.
 
+## Installing into DSH
+
+The port ships as a DSH plugin bundle. Install the package into a profile, list
+it in that profile's bundles, and restart the profile once:
+
+```bash
+dsh plugin --profile web add dsh-fox-pet@link:/path/to/this/checkout
+```
+
+Then add the package to `$DSH_HOME/profiles/web/package.json`:
+
+```json
+"dsh": {
+  "profile": {
+    "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-fox-pet"]
+  }
+}
+```
+
+Restart `dsh web`. The host half registers `/fox-pet/spritesheet.webp`; the
+browser half registers the fox in the `shell.overlay` slot.
+
+Two declarations make this work, and both are required:
+
+- **`dsh.bundle.patch`** — DSH activates a third-party plugin as a *bundle*. The
+  package ships `cordis.patch.yml`, and the profile names the package in
+  `dsh.profile.bundles`. A row written by hand into the profile's own patch is
+  not enough: it composes without error but the plugin never loads.
+- **`dsh.client.platform`, plus `exports["./client"]`** — the browser half is
+  discovered by the host's client module system from the Loader's entries and
+  served under `/plugins`. Without them the host half works and the fox never
+  appears.
+
+`link:` installs a symlink rather than a copy, so the host half keeps reading the
+repository's canonical `assets/` — there is no second copy of the atlas.
+
+Check the install without restarting your own server by booting a throwaway
+instance on another port:
+
+```bash
+dsh --profile web --port 3099 --no-open
+curl -sI http://127.0.0.1:3099/fox-pet/spritesheet.webp          # 200, the atlas
+curl -s  http://127.0.0.1:3099/plugins/??dsh-fox-pet/client.js   # the browser bundle
+```
+
+Both are served without the session cookie: plugin routes are matched before the
+shipped static fallback, which is where browser authentication lives.
+
+`lib/client.js` is generated. Edit `fox-pet.client.js` and run
+`npm run build:client`; `npm test` fails if the two disagree.
+
 ## Checks
 
 ```bash
@@ -56,7 +107,7 @@ npm run verify:deployed  # the same suites against the deployed Package
 ```
 
 `npm test` runs: source shape, engine invariants (225000 ticks), idle/sit
-choreography, emitted CSS, and 60 interaction assertions. It needs nothing but
+choreography, emitted CSS, and 74 interaction assertions. It needs nothing but
 Node.
 
 `test:eyes` is the one script that wants Pillow, because measuring the atlas means
@@ -120,7 +171,7 @@ authored facing left, so `scaleX(-1)` mirrors it for rightward motion.
 
 | Input | Folio's response |
 |---|---|
-| Left-click | Poke — she waves, or wakes with a stretch if asleep |
+| Left-click | Poke — she waves, or wakes with a stretch if asleep, then stays put for 6–12 s |
 | Left-click mid-fall | **Catch** her: that spot becomes solid and she perches there |
 | Double-click | Toggle the sleep/loaf state |
 | Middle-click | Toggle the sleep/loaf state (same gesture, no double-tap) |
@@ -141,7 +192,7 @@ Neither is a fixed loop. Both are a **rest broken by occasional beats**, chosen 
 run time — a run plan per animation (`RUN_PLANS`):
 
 ```
-hold (1200-3600 ms, randomised)
+hold (2400-5400 ms, randomised)
   -> beat (blink / soft blink / double blink / glance / perk / look / startle)
   -> hold
   -> ...
@@ -176,6 +227,30 @@ the test cannot pass by hard-coding which frame is which — and it carries a
 control asserting that the upstream sequence *would* fail the same check. It
 also asserts that the drawn row always belongs to the animation that is running,
 which is how the `runAnim` regression below was caught.
+
+### Pacing
+
+Idle is the resting state; walk and sit are excursions from it. The mode machine
+draws between them at the end of each mode, and the weighting decides whether she
+reads as resting or as pacing:
+
+| mode | share of draws | duration |
+|---|---|---|
+| walk | 16% | 1.6–3.6 s |
+| sit | 28% | 4–9 s |
+| idle | 56% | 5–11 s |
+
+Both excursions return to an idle of 4–11 s. Draws and time are not the same
+thing: idle wins the majority of draws *and* lasts longer, so it takes about
+three quarters of the waking clock. An earlier weighting gave walking a 40% share
+with 2.4–6 s runs, which read as restlessness; over a simulated hour the awake
+mix is now idle 77%, sit 19%, walk 4%, and no single walk runs past 3.6 s.
+`simulate-engine.mjs` asserts those bounds so the mix cannot quietly slide back.
+
+A **left-click pauses her**: it plays the greeting and then holds an idle of
+6–12 s where she stands. Without that she waved and then carried on with whatever
+the mode machine had already chosen, so a click looked like it had been ignored —
+she would walk off mid-acknowledgement.
 
 ### The animation-switch trap
 
@@ -218,7 +293,7 @@ would take about 0.5 s. While airborne:
   position matches the release position;
 - the shadow scales to 50% and fades to 45% at the top of a 320 px fall and
   returns as she lands, which indicates that she is airborne;
-- landing triggers a settle hop, an `alert`, and a squash scaled to the impact,
+- landing triggers an `alert` and a squash scaled to the impact,
   but only above `LAND_IMPACT`; a gentle placement triggers none of them.
 
 ## Pose
@@ -226,11 +301,41 @@ would take about 0.5 s. While airborne:
 Impulses are absorbed by a **damped spring** rather than being set and cleared:
 `SQUASH_STIFF` 260 with `SQUASH_DAMP` 17, integrated in sub-steps of at most 8 ms
 so a stalled frame (dt clamped to 100 ms) can never make it overshoot into a
-wobble. A landing compresses her (scaleY < 1, scaleX > 1) and the spring
-overshoots into a stretch on the way back; a take-off stretches her first.
+wobble. A take-off stretches her first (`SQUASH_JUMP`); a landing compresses her
+(scaleY < 1, scaleX > 1).
 
 `transform-origin` is `50% 100%` — her feet. Scaling about the centre would lift
 her off the ground on every impact.
+
+A landing **releases the spring from rest** and caps the compression
+(`SQUASH_LAND_SCALE` 0.6, and `impact / 2200` rather than `/ 1400`). Releasing
+from rest is the smallest excursion a linear spring allows; a kick in either
+direction only adds energy and deepens the stretch that follows (measured worst
+stretch after a fall to the floor: 1.7% from rest, 2.7% with a +30 kick, 7.5%
+with a -32 one). The bounce that used to be visible came from the landing hop
+(`LAND_BOUNCE`, since removed), not from the spring.
+
+## Gaze — not implemented, and why
+
+Her eyes do **not** follow the pointer. Four attempts were made and each was
+visibly wrong, so it was removed rather than shipped. The reason is the artwork:
+she is one flat 120x130 sprite with no eye layer, the eye opening is only about
+15.6 x 11.9 px, and its bottom edge sits roughly **two pixels** above the cream
+muzzle. The idle row's open-eye frames are near-identical, so there is no
+pre-drawn gaze to switch to, and the directional frames live in the alert row,
+which is a different body pose.
+
+Moving the eye on a flat sprite means clipping it, and the clip boundary is where
+each attempt failed: a hand-drawn pupil either hides inside the painted one or
+covers the iris; a clip smaller than the eye tears it; a clip containing the eye
+drags the muzzle (254/255 worst change in that region); feathering the clip to
+hide the seam blends the shifted eye with the original and reads as two
+overlapping eyes. A hard boundary shows a seam and a soft one shows a double
+image, so with two pixels of clearance there is no third option.
+
+Making it work needs artwork rather than code: the iris and pupil as their own
+atlas cells, or a drawn gaze set in the idle body, so that looking becomes a
+frame choice instead of a pixel shift.
 
 ## Rendering
 

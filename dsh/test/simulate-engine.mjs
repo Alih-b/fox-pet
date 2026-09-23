@@ -50,7 +50,10 @@ plugin.apply(ctx)
 if (registered === null) throw new Error('client did not register into shell.overlay')
 console.log('registered slot:', registered.options.name, '| id:', registered.options.id, '| label:', registered.options.label)
 
-registered.component({})
+// Keep the rendered tree: its handlers are the real interface, and calling one
+// must not re-render, because this stub's useState appends a new slot per call.
+const tree = registered.component({})
+const foxNode = tree.children[0]
 effects.forEach((fn) => fn())
 if (intervalCb === null) throw new Error('component did not start its interval')
 
@@ -63,6 +66,10 @@ let sawSleep = false
 let sawYawn = false
 let sawGreet = false
 let sleepEnteredAtTick = null
+const modeTicks = {}
+let walkRun = 0
+let longestWalk = 0
+let mixTicks = 0
 
 for (let i = 0; i < TICKS; i += 1) {
   intervalCb()
@@ -84,6 +91,20 @@ for (let i = 0; i < TICKS; i += 1) {
   if (s.anim === 'yawn') sawYawn = true
   if (s.anim === 'greet') sawGreet = true
   if (s.mode === 'sleep' && sleepEnteredAtTick === null) sleepEnteredAtTick = i
+  if (s.mode !== 'sleep') {
+    modeTicks[s.mode] = (modeTicks[s.mode] || 0) + 1
+    mixTicks += 1
+    if (s.mode === 'walk') { walkRun += 1; if (walkRun > longestWalk) longestWalk = walkRun } else walkRun = 0
+  } else {
+    walkRun = 0
+  }
+  // Left alone she self-sleeps after 45 s and never wakes, so the rest of the
+  // hour would contribute nothing to the mix. Once that first self-sleep has
+  // been observed (which is its own assertion below), poke her periodically so
+  // the remaining ~59 minutes describe the waking machine.
+  if (i % 800 === 799 && sleepEnteredAtTick !== null) {
+    foxNode.props.onContextMenu({ preventDefault() {} })
+  }
 }
 
 console.log('--- simulated 1 hour of ticks ---')
@@ -96,6 +117,18 @@ console.log('final state:', JSON.stringify({
   anim: states[0].anim,
   frame: states[0].frame,
 }))
+
+// --- she rests more than she moves -------------------------------------------
+// The mode machine used to give walking a 40% share of every transition, so she
+// read as pacing rather than resting. Idle is the resting state and walk/sit are
+// excursions from it, so idle must hold the majority and no walk may run long.
+const modeShare = (m) => (modeTicks[m] || 0) / mixTicks
+const longestWalkSec = longestWalk * TICK / 1000
+console.log('awake mode share: ' + ['idle', 'sit', 'walk'].map((m) => `${m} ${(modeShare(m) * 100).toFixed(1)}%`).join(' | ') + `  longest walk ${longestWalkSec.toFixed(1)}s`)
+if (modeShare('idle') < 0.6) problems.push(`idle share is only ${(modeShare('idle') * 100).toFixed(1)}%`)
+if (modeShare('walk') > 0.15) problems.push(`walk share is ${(modeShare('walk') * 100).toFixed(1)}%`)
+if (longestWalkSec > 6) problems.push(`a single walk ran ${longestWalkSec.toFixed(1)}s`)
+
 // --- the in-source table must match the canonical animation spec ------------
 // assets/pet.json belongs to the repository, not to this port, so this is the
 // check that a hand transcription of the atlas layout has to pass. sitRight and
